@@ -60,7 +60,7 @@ public:
   // Active state
   bool torque{false};
   State joint_state;
-  State actuator_state; // Only used if there is a transmission
+  State actuator_state;  // Only used if there is a transmission
   std::shared_ptr<transmission_interface::Transmission> state_transmission;
   std::shared_ptr<transmission_interface::Transmission> command_transmission;
   double estop_position{0.0};

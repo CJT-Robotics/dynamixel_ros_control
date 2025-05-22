@@ -1,4 +1,4 @@
-# XM series  
+# XM series
 unit_conversions: # dxl value to unit ratio
   rad: 0.001533980787885641
   rad_per_s: 0.02398082392
@@ -8,7 +8,7 @@ unit_conversions: # dxl value to unit ratio
   V: 0.1
   ms: 1.0
   A: 0.00269
-  
+
 indirect_addresses:
 # address start | data start  | count
   #- 168        | 224         | 28

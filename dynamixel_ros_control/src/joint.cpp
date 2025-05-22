@@ -222,11 +222,11 @@ void Joint::resetGoalState(const std::string& interface_name)
     }
   } else {
     // Default value
-    value = default_goal_values_.at(interface_name); // This should exist
+    value = default_goal_values_.at(interface_name);  // This should exist
   }
 
   if (command_transmission) {
-    command_transmission->actuator_to_joint(); // Unfortunately, there is no interface for single interface handles
+    command_transmission->actuator_to_joint();  // Unfortunately, there is no interface for single interface handles
   }
 }
 
