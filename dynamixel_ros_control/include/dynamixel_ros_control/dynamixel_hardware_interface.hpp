@@ -83,6 +83,7 @@ private:
   bool reboot_on_hardware_error_{false};
 
   // ROS interface
+  rclcpp::Node::SharedPtr node_;
   rclcpp::Service<std_srvs::srv::SetBool>::SharedPtr set_torque_service_;
 };
 

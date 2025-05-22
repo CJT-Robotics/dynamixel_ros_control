@@ -118,6 +118,20 @@ DynamixelHardwareInterface::on_init(const hardware_interface::HardwareInfo& hard
     ss << "-- initial values: " << mapToString(joint.dynamixel->getInitialRegisterValues()) << std::endl;
     DXL_LOG_DEBUG(ss.str());
     joints_.emplace(joint.name, std::move(joint));
+
+    // setup set torque service
+    node_ = std::make_shared<rclcpp::Node>("dynamixel_ros_control");
+    set_torque_service_ = node_->create_service<std_srvs::srv::SetBool>(
+        "/set_torque", [this](const std::shared_ptr<std_srvs::srv::SetBool::Request> request,
+                              const std::shared_ptr<std_srvs::srv::SetBool::Response> response) {
+          if (request->data) {
+            response->success = setTorque(true);
+          } else {
+            response->success = setTorque(false);
+          }
+          DXL_LOG_INFO("Request to set torque to " << (request->data ? "ON" : "OFF") << " received.");
+          response->message = response->success ? "Torque set successfully" : "Failed to set torque";
+        });
   }
 
   // Transmissions
