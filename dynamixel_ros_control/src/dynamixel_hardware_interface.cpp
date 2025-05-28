@@ -132,10 +132,10 @@ DynamixelHardwareInterface::on_init(const hardware_interface::HardwareInfo& hard
   exe_thread_ = std::thread([this]{ exe_->spin(); });
   // create a service to set torque
   set_torque_service_ = node_->create_service<std_srvs::srv::SetBool>(
-      "/set_torque", [this](const std::shared_ptr<std_srvs::srv::SetBool::Request> request,
+      hardware_info.name+"/set_torque", [this](const std::shared_ptr<std_srvs::srv::SetBool::Request> request,
                             const std::shared_ptr<std_srvs::srv::SetBool::Response> response) {
-        response->success = setTorque(request->data);
         DXL_LOG_INFO("Request to set torque to " << (request->data ? "ON" : "OFF") << " received.");
+        response->success = setTorque(request->data);
         response->message = response->success ? "Torque set successfully" : "Failed to set torque";
       });
 
