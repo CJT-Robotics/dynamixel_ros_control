@@ -125,8 +125,12 @@ DynamixelHardwareInterface::on_init(const hardware_interface::HardwareInfo& hard
     return hardware_interface::CallbackReturn::ERROR;
   }
 
-  // setup set torque service
-  node_ = std::make_shared<rclcpp::Node>("dynamixel_ros_control");
+  node_ = std::make_shared<rclcpp::Node>("dynamixel_ros_control"); // TODO: set namespace
+  // start a single-threaded executor to spin *just* your node:
+  exe_ = std::make_shared<rclcpp::executors::SingleThreadedExecutor>();
+  exe_->add_node(node_);
+  exe_thread_ = std::thread([this]{ exe_->spin(); });
+  // create a service to set torque
   set_torque_service_ = node_->create_service<std_srvs::srv::SetBool>(
       "/set_torque", [this](const std::shared_ptr<std_srvs::srv::SetBool::Request> request,
                             const std::shared_ptr<std_srvs::srv::SetBool::Response> response) {
