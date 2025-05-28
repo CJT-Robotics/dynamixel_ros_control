@@ -61,7 +61,7 @@ private:
   bool isHardwareOk() const;
   bool reboot() const;
 
-  bool setTorque(bool enabled, bool direct_write=false);
+  bool setTorque(bool enabled, bool direct_write = false);
 
   std::unordered_map<std::string, Joint> joints_;
   DynamixelDriver driver_;
@@ -83,7 +83,10 @@ private:
   bool reboot_on_hardware_error_{false};
 
   // ROS interface
+  rclcpp::Node::SharedPtr node_;
   rclcpp::Service<std_srvs::srv::SetBool>::SharedPtr set_torque_service_;
+  rclcpp::executors::SingleThreadedExecutor::SharedPtr  exe_;
+  std::thread exe_thread_;
 };
 
 }  // namespace dynamixel_ros_control

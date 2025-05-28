@@ -124,6 +124,20 @@ DynamixelHardwareInterface::on_init(const hardware_interface::HardwareInfo& hard
   if (!loadTransmissionConfiguration()) {
     return hardware_interface::CallbackReturn::ERROR;
   }
+  // create and spinn a ros2 node in a separate thread
+  node_ = std::make_shared<rclcpp::Node>("dynamixel_ros_control");
+  exe_ = std::make_shared<rclcpp::executors::SingleThreadedExecutor>();
+  exe_->add_node(node_);
+  exe_thread_ = std::thread([this] { exe_->spin(); });
+
+  // create a service to set torque
+  set_torque_service_ = node_->create_service<std_srvs::srv::SetBool>(
+      hardware_info.name + "/set_torque", [this](const std::shared_ptr<std_srvs::srv::SetBool::Request> request,
+                                                 const std::shared_ptr<std_srvs::srv::SetBool::Response> response) {
+        DXL_LOG_INFO("Request to set torque to " << (request->data ? "ON" : "OFF") << " received.");
+        response->success = setTorque(request->data);
+        response->message = response->success ? "Torque set successfully" : "Failed to set torque";
+      });
 
   return hardware_interface::CallbackReturn::SUCCESS;
 }
@@ -144,7 +158,8 @@ DynamixelHardwareInterface::on_configure(const rclcpp_lifecycle::State& previous
     }
     joint.reset();
   }
-  if (!connection_successful) return hardware_interface::CallbackReturn::FAILURE;
+  if (!connection_successful)
+    return hardware_interface::CallbackReturn::FAILURE;
 
   // const bool torque = !joints_.empty() && joints_.begin()->second.torque;
   // if (torque) {
