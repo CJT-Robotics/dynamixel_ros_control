@@ -135,6 +135,12 @@ DynamixelHardwareInterface::on_init(const hardware_interface::HardwareInfo& hard
       hardware_info.name + "/set_torque", [this](const std::shared_ptr<std_srvs::srv::SetBool::Request> request,
                                                  const std::shared_ptr<std_srvs::srv::SetBool::Response> response) {
         DXL_LOG_INFO("Request to set torque to " << (request->data ? "ON" : "OFF") << " received.");
+        if (request->data) {
+          // Set goal positions to current positions before enabling torque
+          for (auto& [name, joint] : joints_) {
+            joint.resetGoalState();
+          }
+        }
         response->success = setTorque(request->data);
         response->message = response->success ? "Torque set successfully" : "Failed to set torque";
       });
@@ -182,6 +188,12 @@ DynamixelHardwareInterface::on_configure(const rclcpp_lifecycle::State& previous
 hardware_interface::CallbackReturn DynamixelHardwareInterface::on_cleanup(const rclcpp_lifecycle::State& previous_state)
 {
   DXL_LOG_DEBUG("DynamixelHardwareInterface::on_cleanup from " << previous_state.label());
+  if (exe_) {
+    exe_->cancel();
+  }
+  if (exe_thread_.joinable()) {
+    exe_thread_.join();
+  }
   return CallbackReturn::SUCCESS;
 }
 

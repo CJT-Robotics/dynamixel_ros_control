@@ -50,6 +50,7 @@ public:
   hardware_interface::return_type read(const rclcpp::Time& time, const rclcpp::Duration& period) override;
   hardware_interface::return_type write(const rclcpp::Time& time, const rclcpp::Duration& period) override;
 
+
 private:
   bool loadTransmissionConfiguration();
   bool processCommandInterfaceUpdates(const std::vector<std::string>& interface_updates, bool stopping);
