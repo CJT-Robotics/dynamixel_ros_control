@@ -574,11 +574,9 @@ bool DynamixelHardwareInterface::setTorque(const bool enabled, const bool direct
 {
   DXL_LOG_INFO((enabled ? "Enabling" : "Disabling") << " motor torque.");
   if(enabled){
-    if (request->data) {
-      // Set goal positions to current positions before enabling torque
-      for (auto& [name, joint] : joints_) {
-        joint.resetGoalState();
-      }
+    // Set goal positions to current positions before enabling torque
+    for (auto& [name, joint] : joints_) {
+      joint.resetGoalState();
     }
   }
   for (auto& [name, joint] : joints_) {
