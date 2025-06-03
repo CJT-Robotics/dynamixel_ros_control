@@ -135,12 +135,6 @@ DynamixelHardwareInterface::on_init(const hardware_interface::HardwareInfo& hard
       hardware_info.name + "/set_torque", [this](const std::shared_ptr<std_srvs::srv::SetBool::Request> request,
                                                  const std::shared_ptr<std_srvs::srv::SetBool::Response> response) {
         DXL_LOG_INFO("Request to set torque to " << (request->data ? "ON" : "OFF") << " received.");
-        if (request->data) {
-          // Set goal positions to current positions before enabling torque
-          for (auto& [name, joint] : joints_) {
-            joint.resetGoalState();
-          }
-        }
         response->success = setTorque(request->data);
         response->message = response->success ? "Torque set successfully" : "Failed to set torque";
       });
@@ -579,6 +573,14 @@ bool DynamixelHardwareInterface::reboot() const
 bool DynamixelHardwareInterface::setTorque(const bool enabled, const bool direct_write)
 {
   DXL_LOG_INFO((enabled ? "Enabling" : "Disabling") << " motor torque.");
+  if(enabled){
+    if (request->data) {
+      // Set goal positions to current positions before enabling torque
+      for (auto& [name, joint] : joints_) {
+        joint.resetGoalState();
+      }
+    }
+  }
   for (auto& [name, joint] : joints_) {
     joint.torque = enabled;
     if (direct_write && !joint.dynamixel->writeRegister(DXL_REGISTER_CMD_TORQUE, joint.torque)) {
