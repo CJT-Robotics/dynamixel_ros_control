@@ -383,6 +383,11 @@ hardware_interface::return_type DynamixelHardwareInterface::read(const rclcpp::T
 hardware_interface::return_type DynamixelHardwareInterface::write(const rclcpp::Time& /*time*/,
                                                                   const rclcpp::Duration& /*period*/)
 {
+  std::unique_lock<std::mutex> lock(set_torque_mutex_, std::try_to_lock);
+  if (!lock.owns_lock()) {
+    // setTorque is running, skip write
+    return hardware_interface::return_type::OK;
+  }
   // Wait for a successful read after changing the control mode
   bool control_mode_changed = false;
   for (auto& [name, joint] : joints_) {
@@ -572,23 +577,64 @@ bool DynamixelHardwareInterface::reboot() const
 
 bool DynamixelHardwareInterface::setTorque(const bool enabled, const bool direct_write)
 {
+  std::lock_guard<std::mutex> lock(set_torque_mutex_);
   DXL_LOG_INFO((enabled ? "Enabling" : "Disabling") << " motor torque.");
-  if(enabled){
+
+  if (enabled) {
+    // Read current positions
+    read_manager_.read();
+    if (!read_manager_.isOk()) {
+      DXL_LOG_ERROR("Failed to read current positions before enabling torque. Cannot enable torque.");
+      return false;
+    }
+
+    // Check hardware status after reading
+    if (!isHardwareOk()) {
+      DXL_LOG_ERROR("Hardware error detected after reading. Cannot enable torque.");
+      return false;
+    }
+
     // Set goal positions to current positions before enabling torque
     for (auto& [name, joint] : joints_) {
       joint.resetGoalState();
     }
-  }
-  for (auto& [name, joint] : joints_) {
-    joint.torque = enabled;
-    if (direct_write && !joint.dynamixel->writeRegister(DXL_REGISTER_CMD_TORQUE, joint.torque)) {
+
+    // Write goal positions
+    if (!control_write_manager_.write()) {
+      DXL_LOG_ERROR("Failed to write goal positions before enabling torque. Cannot enable torque.");
+      return false;
+    }
+
+    // Check hardware status after writing
+    if (!isHardwareOk()) {
+      DXL_LOG_ERROR("Hardware error detected after writing goal positions. Cannot enable torque.");
       return false;
     }
   }
 
-  if (!direct_write && !torque_write_manager_.write()) {
-    DXL_LOG_ERROR("Setting torque failed!");
-    return false;
+  // Set torque only if all above steps succeeded
+  for (auto& [name, joint] : joints_) {
+    if (direct_write) {
+      if (!joint.dynamixel->writeRegister(DXL_REGISTER_CMD_TORQUE, enabled)) {
+        DXL_LOG_ERROR("Direct torque write failed for joint: " << name);
+        return false;
+      }
+      joint.torque = enabled;
+    } else {
+      joint.torque = enabled;
+    }
+  }
+
+  if (!direct_write) {
+    if (!torque_write_manager_.write()) {
+      DXL_LOG_ERROR("Setting torque failed!");
+      return false;
+    }
+    // Check hardware status after torque write
+    if (!isHardwareOk()) {
+      DXL_LOG_ERROR("Hardware error detected after setting torque.");
+      return false;
+    }
   }
 
   return true;

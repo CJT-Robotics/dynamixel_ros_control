@@ -3,6 +3,7 @@
 
 #include <rclcpp/rclcpp.hpp>
 #include <std_srvs/srv/set_bool.hpp>
+#include <mutex>
 
 #include "joint.hpp"
 #include "sync_read_manager.hpp"
@@ -88,6 +89,7 @@ private:
   rclcpp::Service<std_srvs::srv::SetBool>::SharedPtr set_torque_service_;
   rclcpp::executors::SingleThreadedExecutor::SharedPtr  exe_;
   std::thread exe_thread_;
+  std::mutex set_torque_mutex_;
 };
 
 }  // namespace dynamixel_ros_control
