@@ -194,12 +194,12 @@ hardware_interface::CallbackReturn DynamixelHardwareInterface::on_cleanup(const 
 hardware_interface::CallbackReturn DynamixelHardwareInterface::on_activate(const rclcpp_lifecycle::State& previous_state)
 {
   DXL_LOG_DEBUG("DynamixelHardwareInterface::on_activate from " << previous_state.label());
-  setColorLED(COLOR_BLUE);
   if (torque_on_startup_) {
     if (!setTorque(true)) {
       return CallbackReturn::ERROR;
     }
   }
+  updateColorLED();
   return CallbackReturn::SUCCESS;
 }
 
@@ -212,7 +212,7 @@ DynamixelHardwareInterface::on_deactivate(const rclcpp_lifecycle::State& previou
       return CallbackReturn::ERROR;
     }
   }
-  setColorLED(COLOR_RED); 
+  updateColorLED();
   return CallbackReturn::SUCCESS;
 }
 
@@ -617,9 +617,8 @@ bool DynamixelHardwareInterface::setTorque(const bool enabled, const bool direct
     DXL_LOG_ERROR("Setting torque failed!");
     return false;
   }
-
-  setColorLED(enabled ? COLOR_GREEN : COLOR_BLUE);
-
+  is_torqued_ = enabled;
+  updateColorLED();
   return true;
 }
 
@@ -646,6 +645,22 @@ void DynamixelHardwareInterface::setColorLED(const std::string& color)
     DXL_LOG_ERROR("Unknown color: " << color);
   }
 }
+
+void DynamixelHardwareInterface::updateColorLED()
+{
+  if (lifecycle_state_.label() == hardware_interface::lifecycle_state_names::UNCONFIGURED ||
+    lifecycle_state_.label() == hardware_interface::lifecycle_state_names::INACTIVE) {
+    setColorLED(COLOR_RED);
+  }else {
+    // hardware interface is active
+    if (is_torqued_) {
+      setColorLED(COLOR_BLUE);
+    } else {
+      setColorLED(COLOR_GREEN);
+    }
+  }
+}
+
 
 }  // namespace dynamixel_ros_control
 

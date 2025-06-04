@@ -64,6 +64,7 @@ private:
   bool reboot() const;
 
   bool setTorque(bool enabled, bool direct_write = false);
+  void updateColorLED();
   void setColorLED(const int& red, const int& green, const int& blue);
   void setColorLED(const std::string& color);
 
@@ -85,7 +86,7 @@ private:
   bool torque_on_startup_{false};
   bool torque_off_on_shutdown_{false};
   bool reboot_on_hardware_error_{false};
-
+  bool is_torqued_{false};
   // ROS interface
   rclcpp::Node::SharedPtr node_;
   rclcpp::Service<std_srvs::srv::SetBool>::SharedPtr set_torque_service_;
