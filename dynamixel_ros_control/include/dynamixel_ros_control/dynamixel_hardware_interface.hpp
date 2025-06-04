@@ -90,6 +90,7 @@ private:
   rclcpp::executors::SingleThreadedExecutor::SharedPtr  exe_;
   std::thread exe_thread_;
   std::mutex set_torque_mutex_;
+  std::atomic<bool> disabled_torque_{false};
 };
 
 }  // namespace dynamixel_ros_control

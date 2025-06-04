@@ -411,6 +411,12 @@ hardware_interface::return_type DynamixelHardwareInterface::write(const rclcpp::
     return hardware_interface::return_type::OK;
   }
 
+  // force controller unload when disabling torque
+  if(disabled_torque_){
+    disabled_torque_ = false;
+    return hardware_interface::return_type::ERROR;
+  } 
+
   control_write_manager_.write();
 
   if (!control_write_manager_.isOk()) {
@@ -615,6 +621,9 @@ bool DynamixelHardwareInterface::setTorque(const bool enabled, const bool direct
     DXL_LOG_ERROR("Setting torque failed!");
     return false;
   }
+
+  // trigger controller unload in next write
+  disabled_torque_ = !enabled;
 
   return true;
 }
