@@ -616,7 +616,21 @@ bool DynamixelHardwareInterface::setTorque(const bool enabled, const bool direct
     return false;
   }
 
+  // change color after setting torque
+  setColorLED(0, enabled ? 255 : 0, enabled ? 0 : 255);
+
   return true;
+}
+
+void DynamixelHardwareInterface::setColorLED(const int& red, const int& green, const int& blue)
+{
+  for (auto& [name, joint] : joints_) {
+    if (!joint.dynamixel->writeRegister(DXL_REGISTER_LED_RED, red) ||
+        !joint.dynamixel->writeRegister(DXL_REGISTER_LED_GREEN, green) ||
+        !joint.dynamixel->writeRegister(DXL_REGISTER_LED_BLUE, blue)) {
+      DXL_LOG_ERROR("Failed to set color LED for joint '" << name << "'");
+        }
+  }
 }
 
 }  // namespace dynamixel_ros_control
