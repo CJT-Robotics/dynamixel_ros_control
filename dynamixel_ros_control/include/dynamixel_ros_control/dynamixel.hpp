@@ -40,6 +40,10 @@ constexpr char DXL_REGISTER_VELOCITY[] = "present_velocity";
 constexpr char DXL_REGISTER_EFFORT[] = "present_current";
 constexpr char DXL_REGISTER_HARDWARE_ERROR[] = "hardware_error_status";
 
+constexpr char DXL_REGISTER_LED_RED[] = "led_red";
+constexpr char DXL_REGISTER_LED_GREEN[] = "led_green";
+constexpr char DXL_REGISTER_LED_BLUE[] = "led_blue";
+
 ControlMode stringToControlMode(const std::string& str);
 
 class Dynamixel

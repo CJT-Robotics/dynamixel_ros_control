@@ -199,6 +199,7 @@ hardware_interface::CallbackReturn DynamixelHardwareInterface::on_activate(const
       return CallbackReturn::ERROR;
     }
   }
+  updateColorLED();
   return CallbackReturn::SUCCESS;
 }
 
@@ -211,6 +212,7 @@ DynamixelHardwareInterface::on_deactivate(const rclcpp_lifecycle::State& previou
       return CallbackReturn::ERROR;
     }
   }
+  updateColorLED();
   return CallbackReturn::SUCCESS;
 }
 
@@ -615,9 +617,50 @@ bool DynamixelHardwareInterface::setTorque(const bool enabled, const bool direct
     DXL_LOG_ERROR("Setting torque failed!");
     return false;
   }
-
+  is_torqued_ = enabled;
+  updateColorLED();
   return true;
 }
+
+void DynamixelHardwareInterface::setColorLED(const int& red, const int& green, const int& blue)
+{
+  for (auto& [name, joint] : joints_) {
+    if (!joint.dynamixel->writeRegister(DXL_REGISTER_LED_RED, red) ||
+        !joint.dynamixel->writeRegister(DXL_REGISTER_LED_GREEN, green) ||
+        !joint.dynamixel->writeRegister(DXL_REGISTER_LED_BLUE, blue)) {
+      DXL_LOG_ERROR("Failed to set color LED for joint '" << name << "'");
+        }
+  }
+}
+
+void DynamixelHardwareInterface::setColorLED(const std::string& color)
+{
+  if (color == COLOR_RED) {
+    setColorLED(COLOR_RED_VALUES[0], COLOR_RED_VALUES[1], COLOR_RED_VALUES[2]);
+  } else if (color == COLOR_GREEN) {
+    setColorLED(COLOR_GREEN_VALUES[0], COLOR_GREEN_VALUES[1], COLOR_GREEN_VALUES[2]);
+  } else if (color == COLOR_BLUE) {
+    setColorLED(COLOR_BLUE_VALUES[0], COLOR_BLUE_VALUES[1], COLOR_BLUE_VALUES[2]);
+  } else {
+    DXL_LOG_ERROR("Unknown color: " << color);
+  }
+}
+
+void DynamixelHardwareInterface::updateColorLED()
+{
+  if (lifecycle_state_.label() == hardware_interface::lifecycle_state_names::UNCONFIGURED ||
+    lifecycle_state_.label() == hardware_interface::lifecycle_state_names::INACTIVE) {
+    setColorLED(COLOR_RED);
+  }else {
+    // hardware interface is active
+    if (is_torqued_) {
+      setColorLED(COLOR_BLUE);
+    } else {
+      setColorLED(COLOR_GREEN);
+    }
+  }
+}
+
 
 }  // namespace dynamixel_ros_control
 
