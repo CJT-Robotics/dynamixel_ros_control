@@ -3,6 +3,7 @@
 
 #include <rclcpp/rclcpp.hpp>
 #include <std_srvs/srv/set_bool.hpp>
+#include <mutex>
 
 #include "joint.hpp"
 #include "sync_read_manager.hpp"
@@ -50,6 +51,7 @@ public:
   hardware_interface::return_type read(const rclcpp::Time& time, const rclcpp::Duration& period) override;
   hardware_interface::return_type write(const rclcpp::Time& time, const rclcpp::Duration& period) override;
 
+
 private:
   bool loadTransmissionConfiguration();
   bool processCommandInterfaceUpdates(const std::vector<std::string>& interface_updates, bool stopping);
@@ -87,6 +89,7 @@ private:
   rclcpp::Service<std_srvs::srv::SetBool>::SharedPtr set_torque_service_;
   rclcpp::executors::SingleThreadedExecutor::SharedPtr  exe_;
   std::thread exe_thread_;
+  std::mutex set_torque_mutex_;
 };
 
 }  // namespace dynamixel_ros_control

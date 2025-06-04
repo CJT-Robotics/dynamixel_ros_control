@@ -182,6 +182,12 @@ DynamixelHardwareInterface::on_configure(const rclcpp_lifecycle::State& previous
 hardware_interface::CallbackReturn DynamixelHardwareInterface::on_cleanup(const rclcpp_lifecycle::State& previous_state)
 {
   DXL_LOG_DEBUG("DynamixelHardwareInterface::on_cleanup from " << previous_state.label());
+  if (exe_) {
+    exe_->cancel();
+  }
+  if (exe_thread_.joinable()) {
+    exe_thread_.join();
+  }
   return CallbackReturn::SUCCESS;
 }
 
@@ -346,6 +352,11 @@ hardware_interface::CallbackReturn DynamixelHardwareInterface::on_error(const rc
 hardware_interface::return_type DynamixelHardwareInterface::read(const rclcpp::Time& time,
                                                                  const rclcpp::Duration& /*period*/)
 {
+  std::unique_lock<std::mutex> lock(set_torque_mutex_, std::try_to_lock);
+  if (!lock.owns_lock()) {
+    // setTorque is running, skipping read
+    return hardware_interface::return_type::OK;
+  }
   // Check for hardware errors
   status_read_manager_.read();
   if (!isHardwareOk()) {
@@ -377,6 +388,11 @@ hardware_interface::return_type DynamixelHardwareInterface::read(const rclcpp::T
 hardware_interface::return_type DynamixelHardwareInterface::write(const rclcpp::Time& /*time*/,
                                                                   const rclcpp::Duration& /*period*/)
 {
+  std::unique_lock<std::mutex> lock(set_torque_mutex_, std::try_to_lock);
+  if (!lock.owns_lock()) {
+    // setTorque is running, skip write
+    return hardware_interface::return_type::OK;
+  }
   // Wait for a successful read after changing the control mode
   bool control_mode_changed = false;
   for (auto& [name, joint] : joints_) {
@@ -566,7 +582,28 @@ bool DynamixelHardwareInterface::reboot() const
 
 bool DynamixelHardwareInterface::setTorque(const bool enabled, const bool direct_write)
 {
+  std::lock_guard<std::mutex> lock(set_torque_mutex_);
+
+  if (enabled) {
+    // Read current positions
+    if (!read_manager_.read() || !read_manager_.isOk() || !isHardwareOk()) {
+      DXL_LOG_ERROR("Failed to read current positions before enabling torque. Cannot enable torque.");
+      return false;
+    }
+
+    // Set goal positions to current positions before enabling torque
+    for (auto& [name, joint] : joints_) {
+      joint.resetGoalState();
+    }
+
+    // Write goal positions
+    if (!control_write_manager_.write() || !control_write_manager_.isOk() || !isHardwareOk()) {
+      DXL_LOG_ERROR("Failed to write goal positions before enabling torque. Cannot enable torque.");
+      return false;
+    }
+  }
   DXL_LOG_INFO((enabled ? "Enabling" : "Disabling") << " motor torque.");
+
   for (auto& [name, joint] : joints_) {
     joint.torque = enabled;
     if (direct_write && !joint.dynamixel->writeRegister(DXL_REGISTER_CMD_TORQUE, joint.torque)) {
