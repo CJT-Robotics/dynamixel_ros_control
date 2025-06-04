@@ -65,6 +65,7 @@ private:
 
   bool setTorque(bool enabled, bool direct_write = false);
   void setColorLED(const int& red, const int& green, const int& blue);
+  void setColorLED(const std::string& color);
 
   std::unordered_map<std::string, Joint> joints_;
   DynamixelDriver driver_;

@@ -8,6 +8,14 @@
 
 namespace dynamixel_ros_control {
 
+constexpr int COLOR_RED_VALUES[] = {255, 0, 0};
+constexpr int COLOR_GREEN_VALUES[] = {0, 255, 0};
+constexpr int COLOR_BLUE_VALUES[] = {0, 0, 255};
+
+constexpr char COLOR_RED[] = "red";
+constexpr char COLOR_GREEN[] = "green";
+constexpr char COLOR_BLUE[] = "blue";
+
 using ParameterMap = std::unordered_map<std::string, std::string>;
 
 template <typename T>

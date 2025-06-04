@@ -194,6 +194,7 @@ hardware_interface::CallbackReturn DynamixelHardwareInterface::on_cleanup(const 
 hardware_interface::CallbackReturn DynamixelHardwareInterface::on_activate(const rclcpp_lifecycle::State& previous_state)
 {
   DXL_LOG_DEBUG("DynamixelHardwareInterface::on_activate from " << previous_state.label());
+  setColorLED(COLOR_BLUE);
   if (torque_on_startup_) {
     if (!setTorque(true)) {
       return CallbackReturn::ERROR;
@@ -211,6 +212,7 @@ DynamixelHardwareInterface::on_deactivate(const rclcpp_lifecycle::State& previou
       return CallbackReturn::ERROR;
     }
   }
+  setColorLED(COLOR_RED); 
   return CallbackReturn::SUCCESS;
 }
 
@@ -616,8 +618,7 @@ bool DynamixelHardwareInterface::setTorque(const bool enabled, const bool direct
     return false;
   }
 
-  // change color after setting torque
-  setColorLED(0, enabled ? 255 : 0, enabled ? 0 : 255);
+  setColorLED(enabled ? COLOR_GREEN : COLOR_BLUE);
 
   return true;
 }
@@ -630,6 +631,19 @@ void DynamixelHardwareInterface::setColorLED(const int& red, const int& green, c
         !joint.dynamixel->writeRegister(DXL_REGISTER_LED_BLUE, blue)) {
       DXL_LOG_ERROR("Failed to set color LED for joint '" << name << "'");
         }
+  }
+}
+
+void DynamixelHardwareInterface::setColorLED(const std::string& color)
+{
+  if (color == COLOR_RED) {
+    setColorLED(COLOR_RED_VALUES[0], COLOR_RED_VALUES[1], COLOR_RED_VALUES[2]);
+  } else if (color == COLOR_GREEN) {
+    setColorLED(COLOR_GREEN_VALUES[0], COLOR_GREEN_VALUES[1], COLOR_GREEN_VALUES[2]);
+  } else if (color == COLOR_BLUE) {
+    setColorLED(COLOR_BLUE_VALUES[0], COLOR_BLUE_VALUES[1], COLOR_BLUE_VALUES[2]);
+  } else {
+    DXL_LOG_ERROR("Unknown color: " << color);
   }
 }
 
