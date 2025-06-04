@@ -74,6 +74,14 @@ will make the input voltage available to controllers as a state interface.
 ### Automatic conversion to SI units
 All register values are converted from dynamixel counts to SI units automatically. This means, registers can be read and written using SI units without additional conversions required. Some examples are _goal_position_ and _max_position_limit_ in radians, _velocity_limit_ in radians per second or _present_temperature_ in celsius.
 
+### LED Status Indicators
+
+The onboard LED reflects the current state of the hardware interface:
+
+* **🔴 Red** – Hardware interface is **inactive** or **unconfigured**
+* **🔵 Blue** – Hardware interface is **active**, and motors are **torqued on** ((controllers can command the joints)
+* **🟢 Green** – Hardware interface is **active**, but motors are **torqued off** (safe for manual movement)
+
 ## Contribution
 Feel free to contribute to this project by opening an issue or a pull request.
 ### Adding support for new models
