@@ -583,7 +583,6 @@ bool DynamixelHardwareInterface::reboot() const
 bool DynamixelHardwareInterface::setTorque(const bool enabled, const bool direct_write)
 {
   std::lock_guard<std::mutex> lock(set_torque_mutex_);
-  DXL_LOG_INFO((enabled ? "Enabling" : "Disabling") << " motor torque.");
 
   if (enabled) {
     // Read current positions
@@ -603,8 +602,9 @@ bool DynamixelHardwareInterface::setTorque(const bool enabled, const bool direct
       return false;
     }
   }
+  DXL_LOG_INFO((enabled ? "Enabling" : "Disabling") << " motor torque.");
 
-   for (auto& [name, joint] : joints_) {
+  for (auto& [name, joint] : joints_) {
     joint.torque = enabled;
     if (direct_write && !joint.dynamixel->writeRegister(DXL_REGISTER_CMD_TORQUE, joint.torque)) {
       return false;
