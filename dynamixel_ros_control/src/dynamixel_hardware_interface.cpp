@@ -149,6 +149,10 @@ DynamixelHardwareInterface::on_init(const hardware_interface::HardwareInfo& hard
     return hardware_interface::CallbackReturn::ERROR;
   }
 
+  soft_e_stop_subscription_ = node_->create_subscription<std_msgs::msg::Bool>(
+      hardware_info.name + "/soft_e_stop", rclcpp::QoS(10),
+      [this](const std_msgs::msg::Bool::SharedPtr mgs) { e_stop_active = mgs->data; });
+
   return hardware_interface::CallbackReturn::SUCCESS;
 }
 
