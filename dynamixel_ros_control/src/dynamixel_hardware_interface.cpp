@@ -152,7 +152,7 @@ DynamixelHardwareInterface::on_init(const hardware_interface::HardwareInfo& hard
   soft_e_stop_subscription_ = node_->create_subscription<std_msgs::msg::Bool>(
       hardware_info.name + "/soft_e_stop", rclcpp::QoS{10}, [this](const std_msgs::msg::Bool::SharedPtr msg) {
         DXL_LOG_WARN("Soft E-Stop received: " << (msg->data ? "ON" : "OFF"));
-        std::lock_guard<std::mutex> lock(set_torque_mutex_); // make sure setTorque is not running
+        std::lock_guard<std::mutex> lock(set_torque_mutex_);  // make sure setTorque is not running
         e_stop_active_ = msg->data;
         for (auto& [name, joint] : joints_)
           joint.recordEStopPosition();
@@ -435,14 +435,18 @@ hardware_interface::return_type DynamixelHardwareInterface::write(const rclcpp::
   }
   // *** E-Stop Checks ***************************************************
   if (e_stop_active_) {
+    bool ctrl_mode_change_necessary = false;
     for (auto& [name, joint] : joints_) {
       if (joint.isEffortControlled()) {
         joint.ensureJointIsPositionControlled();
-        return hardware_interface::return_type::OK;
+        ctrl_mode_change_necessary = true;
+      } else {
+        // TODO: check if this works or if arm oscillates -> then use recorded e-stop position
+        joint.resetGoalState();  // reset Goal State - basically ignore controllers
+        // TODO: maybe here updateLED necessary
       }
-      // TODO: check if this works or if arm oscillates -> then use recorded e-stop position
-      joint.resetGoalState();  // reset Goal State - basically ignore controllers
-      // TODO: maybe here updateLED necessary
+      if (ctrl_mode_change_necessary)
+        return hardware_interface::return_type::OK;
     }
   }
 

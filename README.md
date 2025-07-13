@@ -123,7 +123,7 @@ torque.
 The onboard LED reflects the current state of the hardware interface:
 
 * **🔴 Red** – Hardware interface is **inactive** or **unconfigured**
-* **🟠** Orange - Software EStop is **active** - Hardware Interface makes sure robot won't move
+* **🟠** Orange - Software E-Stop is **active** - Hardware Interface makes sure robot won't move
 * **🔵 Blue** – Hardware interface is **active**, and motors are **torqued on** ((controllers can command the joints)
 * **🟢 Green** – Hardware interface is **active**, but motors are **torqued off** (safe for manual movement)
 

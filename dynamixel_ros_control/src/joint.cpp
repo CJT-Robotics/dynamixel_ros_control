@@ -284,7 +284,7 @@ bool Joint::ensureJointIsPositionControlled()
                                        << "available.");
     return false;
   }
-  // remove all active command interfces
+  // remove all active command interfaces
   for (const auto& active_command_interface : active_command_interfaces_) {
     removeActiveCommandInterface(active_command_interface);
   }
@@ -297,8 +297,7 @@ bool Joint::ensureJointIsPositionControlled()
 void Joint::recordEStopPosition()
 {
   // check if position interface exists
-  auto it = std::find(joint_state.current.begin(), joint_state.current.end(), hardware_interface::HW_IF_POSITION);
-  if (it != joint_state.current.end()) {
+  if (joint_state.current.find(hardware_interface::HW_IF_POSITION) != joint_state.current.end()) {
     estop_position = joint_state.current.at(hardware_interface::HW_IF_POSITION);
   }
 }
