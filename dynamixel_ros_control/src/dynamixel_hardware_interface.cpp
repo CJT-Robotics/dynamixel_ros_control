@@ -438,7 +438,8 @@ hardware_interface::return_type DynamixelHardwareInterface::write(const rclcpp::
     bool ctrl_mode_change_necessary = false;
     for (auto& [name, joint] : joints_) {
       if (joint.isEffortControlled()) {
-        joint.ensureJointIsPositionControlled();
+        if (!joint.ensureJointIsPositionControlled())
+          DXL_LOG_WARN("Failed to set joint '" << name << "' to position control mode after e-stop activation.");
         ctrl_mode_change_necessary = true;
       } else {
         // TODO: check if this works or if arm oscillates -> then use recorded e-stop position

@@ -118,6 +118,12 @@ back on.
 For example a position controller would otherwise try to move the motor to the last commanded position when re-enabling
 torque.
 
+### Software E-Stop
+
+The hardware interface provides a software emergency‑stop by subscribing to the <hardware_interface_name>/soft_e_stop
+topic (std_msgs/msg/Bool). Whenever it receives a true message, all motion commands are suppressed, and the joints hold
+their current positions. Once a false message is published, normal control behavior resumes.
+
 ### LED Status Indicators
 
 The onboard LED reflects the current state of the hardware interface:
