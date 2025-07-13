@@ -710,15 +710,15 @@ void DynamixelHardwareInterface::updateColorLED()
     setColorLED(COLOR_RED);
     return;
   }
+  if (!is_torqued_) {
+    setColorLED(COLOR_GREEN);
+    return;
+  }
   if (e_stop_active_) {
     setColorLED(COLOR_ORANGE);
     return;
   }
-  if (is_torqued_) {
-    setColorLED(COLOR_BLUE);
-  } else {
-    setColorLED(COLOR_GREEN);
-  }
+  setColorLED(COLOR_BLUE);
 }
 
 void DynamixelHardwareInterface::adjustTransmissionOffsetsCallback(

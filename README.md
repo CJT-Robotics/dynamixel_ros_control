@@ -129,8 +129,8 @@ their current positions. Once a false message is published, normal control behav
 The onboard LED reflects the current state of the hardware interface:
 
 * **🔴 Red** – Hardware interface is **inactive** or **unconfigured**
-* **🟠** Orange - Software E-Stop is **active** - Hardware Interface makes sure robot won't move
-* **🔵 Blue** – Hardware interface is **active**, and motors are **torqued on** ((controllers can command the joints)
+* **🟠** Orange - The software E‑Stop is engaged. All motion commands are suppressed, ensuring the robot cannot move
+* **🔵 Blue** – Hardware interface is **active**, and motors are **torqued on** (controllers can command the joints)
 * **🟢 Green** – Hardware interface is **active**, but motors are **torqued off** (safe for manual movement)
 
 ### Transmission Support
