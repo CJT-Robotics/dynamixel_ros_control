@@ -39,6 +39,9 @@ public:
   bool controlModeChanged() const;
   void resetControlModeChanged();
 
+  bool ensureJointIsPositionControlled();
+  void recordEStopPosition();
+
   std::string stateInterfaceToRegisterName(const std::string& interface_name) const;
   std::string commandInterfaceToRegisterName(const std::string& interface_name) const;
 

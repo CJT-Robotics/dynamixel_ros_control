@@ -150,8 +150,14 @@ DynamixelHardwareInterface::on_init(const hardware_interface::HardwareInfo& hard
   }
 
   soft_e_stop_subscription_ = node_->create_subscription<std_msgs::msg::Bool>(
-      hardware_info.name + "/soft_e_stop", rclcpp::QoS(10),
-      [this](const std_msgs::msg::Bool::SharedPtr mgs) { e_stop_active = mgs->data; });
+      hardware_info.name + "/soft_e_stop", rclcpp::QoS{10}, [this](const std_msgs::msg::Bool::SharedPtr msg) {
+        DXL_LOG_WARN("Soft E-Stop received: " << (msg->data ? "ON" : "OFF"));
+        std::lock_guard<std::mutex> lock(set_torque_mutex_); // make sure setTorque is not running
+        e_stop_active_ = msg->data;
+        for (auto& [name, joint] : joints_)
+          joint.recordEStopPosition();
+        updateColorLED();
+      });
 
   return hardware_interface::CallbackReturn::SUCCESS;
 }
@@ -404,12 +410,13 @@ hardware_interface::return_type DynamixelHardwareInterface::read(const rclcpp::T
 hardware_interface::return_type DynamixelHardwareInterface::write(const rclcpp::Time& /*time*/,
                                                                   const rclcpp::Duration& /*period*/)
 {
+  // *** make sure setTorque is not set simultaneously **************************
   std::unique_lock<std::mutex> lock(set_torque_mutex_, std::try_to_lock);
   if (!lock.owns_lock()) {
     // setTorque is running, skip write
     return hardware_interface::return_type::OK;
   }
-  // Wait for a successful read after changing the control mode
+  // *** Wait for a successful read after changing the control mode *************
   bool control_mode_changed = false;
   for (auto& [name, joint] : joints_) {
     if (joint.command_transmission) {
@@ -425,6 +432,18 @@ hardware_interface::return_type DynamixelHardwareInterface::write(const rclcpp::
   if (!first_read_successful_ || control_mode_changed) {
     // DXL_LOG_ERROR("Write called without successful read. This should not happen.");
     return hardware_interface::return_type::OK;
+  }
+  // *** E-Stop Checks ***************************************************
+  if (e_stop_active_) {
+    for (auto& [name, joint] : joints_) {
+      if (joint.isEffortControlled()) {
+        joint.ensureJointIsPositionControlled();
+        return hardware_interface::return_type::OK;
+      }
+      // TODO: check if this works or if arm oscillates -> then use recorded e-stop position
+      joint.resetGoalState();  // reset Goal State - basically ignore controllers
+      // TODO: maybe here updateLED necessary
+    }
   }
 
   control_write_manager_.write();
@@ -684,13 +703,16 @@ void DynamixelHardwareInterface::updateColorLED()
   if (lifecycle_state_.label() == hardware_interface::lifecycle_state_names::UNCONFIGURED ||
       lifecycle_state_.label() == hardware_interface::lifecycle_state_names::INACTIVE) {
     setColorLED(COLOR_RED);
+    return;
+  }
+  if (e_stop_active_) {
+    setColorLED(COLOR_ORANGE);
+    return;
+  }
+  if (is_torqued_) {
+    setColorLED(COLOR_BLUE);
   } else {
-    // hardware interface is active
-    if (is_torqued_) {
-      setColorLED(COLOR_BLUE);
-    } else {
-      setColorLED(COLOR_GREEN);
-    }
+    setColorLED(COLOR_GREEN);
   }
 }
 

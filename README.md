@@ -123,7 +123,8 @@ torque.
 The onboard LED reflects the current state of the hardware interface:
 
 * **🔴 Red** – Hardware interface is **inactive** or **unconfigured**
-* **🔵 Blue** – Hardware interface is **active**, and motors are **torqued on** (controllers can command the joints)
+* **🟠** Orange - Software EStop is **active** - Hardware Interface makes sure robot won't move
+* **🔵 Blue** – Hardware interface is **active**, and motors are **torqued on** ((controllers can command the joints)
 * **🟢 Green** – Hardware interface is **active**, but motors are **torqued off** (safe for manual movement)
 
 ### Transmission Support
@@ -154,9 +155,7 @@ external_joint_measurements:
 ```
 
 ## Contribution
-
 Feel free to contribute to this project by opening an issue or a pull request.
-
 ### Adding support for new models
 
 The driver contains a database of control tables of supported models. If a control table of a specific model is missing,

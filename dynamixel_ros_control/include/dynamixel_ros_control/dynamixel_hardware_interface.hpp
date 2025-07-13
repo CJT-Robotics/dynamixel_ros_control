@@ -55,6 +55,8 @@ public:
   hardware_interface::return_type write(const rclcpp::Time& time, const rclcpp::Duration& period) override;
 
 
+
+
 private:
   bool loadTransmissionConfiguration();
   bool processCommandInterfaceUpdates(const std::vector<std::string>& interface_updates, bool stopping);
@@ -93,7 +95,7 @@ private:
   bool torque_off_on_shutdown_{false};
   bool reboot_on_hardware_error_{false};
   bool is_torqued_{false};
-  std::atomic<bool> e_stop_active{false};
+  std::atomic<bool> e_stop_active_{false};
   // ROS interface
   rclcpp::Node::SharedPtr node_;
   rclcpp::Service<std_srvs::srv::SetBool>::SharedPtr set_torque_service_;

@@ -222,11 +222,11 @@ void Joint::resetGoalState(const std::string& interface_name)
     }
   } else {
     // Default value
-    value = default_goal_values_.at(interface_name); // This should exist
+    value = default_goal_values_.at(interface_name);  // This should exist
   }
 
   if (command_transmission) {
-    command_transmission->actuator_to_joint(); // Unfortunately, there is no interface for single interface handles
+    command_transmission->actuator_to_joint();  // Unfortunately, there is no interface for single interface handles
   }
 }
 
@@ -269,6 +269,38 @@ ControlMode Joint::getControlModeFromInterfaces(const std::vector<std::string>& 
                << hardware_interface::HW_IF_EFFORT << " have been requested. Defaulting to "
                << hardware_interface::HW_IF_POSITION << " mode");
   return POSITION;
+}
+
+bool Joint::ensureJointIsPositionControlled()
+{
+  // check if position control is already set
+  if (isPositionControlled()) {
+    return true;
+  }
+  // check if position command interface is available
+  if (std::find(command_interfaces_.begin(), command_interfaces_.end(), hardware_interface::HW_IF_POSITION) ==
+      command_interfaces_.end()) {
+    DXL_LOG_ERROR("Cannot set joint '" << name << "' to position control because no position command interface is "
+                                       << "available.");
+    return false;
+  }
+  // remove all active command interfces
+  for (const auto& active_command_interface : active_command_interfaces_) {
+    removeActiveCommandInterface(active_command_interface);
+  }
+  // add position command interface
+  addActiveCommandInterface(hardware_interface::HW_IF_POSITION);
+  // update control mode
+  updateControlMode();
+  return true;
+}
+void Joint::recordEStopPosition()
+{
+  // check if position interface exists
+  auto it = std::find(joint_state.current.begin(), joint_state.current.end(), hardware_interface::HW_IF_POSITION);
+  if (it != joint_state.current.end()) {
+    estop_position = joint_state.current.at(hardware_interface::HW_IF_POSITION);
+  }
 }
 
 bool Joint::initDefaultGoalValues()
