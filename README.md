@@ -113,10 +113,8 @@ ros2 service call /<hardware_interface>/set_torque std_srvs/srv/SetBool "{data: 
 The hardware interface automatically updates the **goal position register** of each motor to the current position before
 enabling torque.
 This prevents the motors from abruptly moving toward a previously commanded goal position.
-Active Controllers will be deactivated when torque is turned off to prevent unexpected behavior when torque is turned
-back on.
-For example a position controller would otherwise try to move the motor to the last commanded position when re-enabling
-torque.
+Active Controllers will be automatically deactivated when torque is turned off to prevent unexpected behavior when torque is turned
+back on (e.g., a position controller driving the motor to an outdated goal).
 
 ### Software E-Stop
 

@@ -150,7 +150,7 @@ DynamixelHardwareInterface::on_init(const hardware_interface::HardwareInfo& hard
   }
 
   soft_e_stop_subscription_ = node_->create_subscription<std_msgs::msg::Bool>(
-      hardware_info.name + "/soft_e_stop", rclcpp::QoS{10}, [this](const std_msgs::msg::Bool::SharedPtr msg) {
+      "~/soft_e_stop", rclcpp::QoS{10}, [this](const std_msgs::msg::Bool::SharedPtr msg) {
         DXL_LOG_WARN("Soft E-Stop received: " << (msg->data ? "ON" : "OFF"));
         std::lock_guard<std::mutex> lock(set_torque_mutex_);  // make sure setTorque is not running
         e_stop_active_ = msg->data;
