@@ -59,6 +59,14 @@ bool loadInterfaceRegisterNameTranslation(std::unordered_map<std::string, std::s
 
 namespace dynamixel_ros_control {
 
+DynamixelHardwareInterface::~DynamixelHardwareInterface()
+{
+  if (exe_)
+    exe_->cancel();
+  if (exe_thread_.joinable())
+    exe_thread_.join();
+}
+
 hardware_interface::CallbackReturn
 DynamixelHardwareInterface::on_init(const hardware_interface::HardwareInfo& hardware_info)
 {

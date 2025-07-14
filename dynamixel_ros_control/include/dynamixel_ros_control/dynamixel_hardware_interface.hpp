@@ -20,6 +20,7 @@ namespace dynamixel_ros_control {
 class DynamixelHardwareInterface : public hardware_interface::SystemInterface
 {
 public:
+  ~DynamixelHardwareInterface() override;
   /**
    * Load all parameters from hardware info
    * @param hardware_info
