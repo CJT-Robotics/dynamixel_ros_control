@@ -153,9 +153,25 @@ DynamixelHardwareInterface::on_init(const hardware_interface::HardwareInfo& hard
       "~/soft_e_stop", rclcpp::QoS{10}, [this](const std_msgs::msg::Bool::SharedPtr msg) {
         DXL_LOG_WARN("Soft E-Stop received: " << (msg->data ? "ON" : "OFF"));
         std::lock_guard<std::mutex> lock(set_torque_mutex_);  // make sure setTorque is not running
+        if (msg->data) {
+          // check that no joint is effort controlled
+          bool effort = false;
+          for (const auto& [name, joint] : joints_) {
+            if (joint.isEffortControlled()) {
+              effort = true;
+              break;
+            }
+          }
+          if (effort) {
+            DXL_LOG_WARN(
+                "Effort controlled joints are not supported in soft e-stop mode. Will not disable motion commands.");
+            e_stop_active_ = false;
+            return;
+          }
+          for (auto& [name, joint] : joints_)
+            joint.recordEStopPosition();
+        }
         e_stop_active_ = msg->data;
-        for (auto& [name, joint] : joints_)
-          joint.recordEStopPosition();
         updateColorLED();
       });
 
@@ -435,19 +451,10 @@ hardware_interface::return_type DynamixelHardwareInterface::write(const rclcpp::
   }
   // *** E-Stop Checks ***************************************************
   if (e_stop_active_) {
-    bool ctrl_mode_change_necessary = false;
     for (auto& [name, joint] : joints_) {
-      if (joint.isEffortControlled()) {
-        if (!joint.ensureJointIsPositionControlled())
-          DXL_LOG_WARN("Failed to set joint '" << name << "' to position control mode after e-stop activation.");
-        ctrl_mode_change_necessary = true;
-      } else {
-        // TODO: check if this works or if arm oscillates -> then use recorded e-stop position
+      if (!joint.isEffortControlled()) {
         joint.resetGoalState();  // reset Goal State - basically ignore controllers
-        // TODO: maybe here updateLED necessary
       }
-      if (ctrl_mode_change_necessary)
-        return hardware_interface::return_type::OK;
     }
   }
 
@@ -698,7 +705,7 @@ void DynamixelHardwareInterface::setColorLED(const std::string& color)
     setColorLED(COLOR_GREEN_VALUES[0], COLOR_GREEN_VALUES[1], COLOR_GREEN_VALUES[2]);
   } else if (color == COLOR_BLUE) {
     setColorLED(COLOR_BLUE_VALUES[0], COLOR_BLUE_VALUES[1], COLOR_BLUE_VALUES[2]);
-  }else if (color == COLOR_ORANGE) {
+  } else if (color == COLOR_ORANGE) {
     setColorLED(COLOR_ORANGE_VALUES[0], COLOR_ORANGE_VALUES[1], COLOR_ORANGE_VALUES[2]);
   } else {
     DXL_LOG_ERROR("Unknown color: " << color);

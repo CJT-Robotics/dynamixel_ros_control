@@ -122,6 +122,8 @@ The hardware interface provides a software emergency‑stop by subscribing to th
 topic (std_msgs/msg/Bool). Whenever it receives a true message, all motion commands are suppressed, and the joints hold
 their current positions. Once a false message is published, normal control behavior resumes.
 
+⚠️ Note that currently, the software E-Stop won't work if a pure effort controller is used.
+
 ### LED Status Indicators
 
 The onboard LED reflects the current state of the hardware interface:
