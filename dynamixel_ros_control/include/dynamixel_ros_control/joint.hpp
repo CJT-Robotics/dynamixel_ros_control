@@ -48,8 +48,6 @@ public:
   void resetGoalState(const std::string& interface_name);
   void resetGoalState();
 
-  void setPositionGoalStateToEStopPosition();
-
   /**
    * Returns the current/goal state that is written to the dynamixel motors
    * @return

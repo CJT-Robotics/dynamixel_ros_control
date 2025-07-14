@@ -219,10 +219,7 @@ hardware_interface::CallbackReturn DynamixelHardwareInterface::on_activate(const
       return CallbackReturn::ERROR;
     }
   }
-  {
-    std::lock_guard<std::mutex> lock(set_torque_mutex_);
-    updateColorLED();
-  }
+  updateColorLED();
   return CallbackReturn::SUCCESS;
 }
 
@@ -440,12 +437,14 @@ hardware_interface::return_type DynamixelHardwareInterface::write(const rclcpp::
   if (e_stop_active_) {
     bool ctrl_mode_change_necessary = false;
     for (auto& [name, joint] : joints_) {
-      if (joint.isEffortControlled()||joint.isPositionControlled()) {
+      if (joint.isEffortControlled()) {
         if (!joint.ensureJointIsPositionControlled())
           DXL_LOG_WARN("Failed to set joint '" << name << "' to position control mode after e-stop activation.");
         ctrl_mode_change_necessary = true;
       } else {
-        joint.setPositionGoalStateToEStopPosition();  // reset Goal State - basically ignore controllers
+        // TODO: check if this works or if arm oscillates -> then use recorded e-stop position
+        joint.resetGoalState();  // reset Goal State - basically ignore controllers
+        // TODO: maybe here updateLED necessary
       }
       if (ctrl_mode_change_necessary)
         return hardware_interface::return_type::OK;

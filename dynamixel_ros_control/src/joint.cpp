@@ -301,13 +301,6 @@ void Joint::recordEStopPosition()
     estop_position = joint_state.current.at(hardware_interface::HW_IF_POSITION);
   }
 }
-void Joint::setPositionGoalStateToEStopPosition()
-{
-  if (joint_state.goal.find(hardware_interface::HW_IF_POSITION) != joint_state.goal.end()) {
-    joint_state.goal.at(hardware_interface::HW_IF_POSITION) = estop_position;
-  }
-
-}
 
 bool Joint::initDefaultGoalValues()
 {
