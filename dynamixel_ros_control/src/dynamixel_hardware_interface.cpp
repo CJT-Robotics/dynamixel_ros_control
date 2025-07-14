@@ -124,7 +124,7 @@ DynamixelHardwareInterface::on_init(const hardware_interface::HardwareInfo& hard
   // create and spinn a ros2 node in a separate thread (making sure it gets a separate name)
   // TODO: for now: hacky solution for preventing name conflicts while ensuring namespace is set correctly
   auto tmp_node = rclcpp::Node::make_shared("dynamixel_ros_control_node");
-  std::string ns = std::string(tmp_node->get_namespace());
+  auto ns = std::string(tmp_node->get_namespace());
   node_ = std::make_shared<rclcpp::Node>(hardware_info.name, ns, rclcpp::NodeOptions().use_global_arguments(false));
   exe_ = std::make_shared<rclcpp::executors::MultiThreadedExecutor>();
   exe_->add_node(node_);
@@ -698,6 +698,8 @@ void DynamixelHardwareInterface::setColorLED(const std::string& color)
     setColorLED(COLOR_GREEN_VALUES[0], COLOR_GREEN_VALUES[1], COLOR_GREEN_VALUES[2]);
   } else if (color == COLOR_BLUE) {
     setColorLED(COLOR_BLUE_VALUES[0], COLOR_BLUE_VALUES[1], COLOR_BLUE_VALUES[2]);
+  }else if (color == COLOR_ORANGE) {
+    setColorLED(COLOR_ORANGE_VALUES[0], COLOR_ORANGE_VALUES[1], COLOR_ORANGE_VALUES[2]);
   } else {
     DXL_LOG_ERROR("Unknown color: " << color);
   }
