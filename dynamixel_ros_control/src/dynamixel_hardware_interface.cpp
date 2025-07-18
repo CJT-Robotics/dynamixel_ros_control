@@ -636,7 +636,7 @@ bool DynamixelHardwareInterface::setTorque(const bool enabled, int retries, cons
 
     // Re-read goal positions for verification
     if (!cmd_read_manager_.read() || !cmd_read_manager_.isOk()) {
-      DXL_LOG_ERROR("Failed to read goal positions after enabling torque. Cannot verify goal positions.");
+      DXL_LOG_ERROR("Failed to re-read goal positions before enabling torque. Cannot verify goal positions.");
       return false;
     }
 
@@ -644,7 +644,7 @@ bool DynamixelHardwareInterface::setTorque(const bool enabled, int retries, cons
     for (auto& [name, joint] : joints_) {
       if (joint.joint_state.goal[hardware_interface::HW_IF_POSITION] !=
           joint.dynamixel_goal_position) {
-        DXL_LOG_ERROR("Joint '" << name << "' goal position does not match read goal position after enabling torque.");
+        DXL_LOG_ERROR("Joint '" << name << "' goal position does not match read goal position before enabling torque.");
         return false;
       }
     }
@@ -664,9 +664,9 @@ bool DynamixelHardwareInterface::setTorque(const bool enabled, int retries, cons
   DXL_LOG_INFO((enabled ? "Enabling" : "Disabling") << " motor torque.");
 
   bool success = false;
-  retries = std::max(retries, 1);  // Ensure at least one retry
+  retries = std::max(retries, 1);  // ensure at least one attempt
   int counter = 0;
-  while (counter <= retries && !success) {
+  while (counter < retries && !success) {
     success = true;
     for (auto& [name, joint] : joints_) {
       joint.torque = enabled;  // set torque of each joint -> also relevant for indirect write
@@ -682,7 +682,7 @@ bool DynamixelHardwareInterface::setTorque(const bool enabled, int retries, cons
 
     counter++;
     if (!success) {
-      DXL_LOG_WARN("Failed to set torque for all joints. Retrying... (" << counter << "/" << retries << ")");
+      DXL_LOG_WARN("Failed to set torque for all joints. Retrying... (" << counter << "of " << retries << ")");
     }
   }
   if (success) {
