@@ -56,6 +56,7 @@ private:
   bool loadTransmissionConfiguration();
   bool processCommandInterfaceUpdates(const std::vector<std::string>& interface_updates, bool stopping);
   bool setUpStateReadManager();
+  bool setUpCmdReadManager();
   bool setUpStatusReadManager();
   bool setUpTorqueWriteManager();
   bool setUpControlWriteManager();
@@ -63,7 +64,7 @@ private:
   bool isHardwareOk() const;
   bool reboot() const;
 
-  bool setTorque(bool enabled, bool direct_write = false);
+  bool setTorque(bool enabled, int retries = 5, bool direct_write = false);
   void updateColorLED();
   void setColorLED(const int& red, const int& green, const int& blue);
   void setColorLED(const std::string& color);
@@ -77,6 +78,7 @@ private:
   // Read
   SyncReadManager read_manager_;
   SyncReadManager status_read_manager_;
+  SyncReadManager cmd_read_manager_;
   rclcpp::Time last_successful_read_time_;
   bool first_read_successful_{false};
 

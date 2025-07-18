@@ -546,6 +546,19 @@ bool DynamixelHardwareInterface::setUpStatusReadManager()
   status_read_manager_.addRegister(DXL_REGISTER_HARDWARE_ERROR, status_mapping);
   return status_read_manager_.init(driver_);
 }
+bool DynamixelHardwareInterface::setUpCmdReadManager()
+{
+  cmd_read_manager_ = SyncReadManager();
+  DxlValueMappingList goal_cmd_mapping;
+  for (auto& [name, joint] : joints_) {
+    cmd_read_manager_.addDynamixel(joint.dynamixel.get());
+    goal_cmd_mapping.push_back(
+        std::make_pair<Dynamixel*, DxlValue>(joint.dynamixel.get(), DxlValue(&joint.dynamixel_goal_position)));
+  }
+
+  cmd_read_manager_.addRegister(DXL_REGISTER_CMD_POSITION, goal_cmd_mapping);
+  return cmd_read_manager_.init(driver_);
+}
 bool DynamixelHardwareInterface::setUpTorqueWriteManager()
 {
   torque_write_manager_ = SyncWriteManager();
@@ -599,7 +612,7 @@ bool DynamixelHardwareInterface::reboot() const
   return true;
 }
 
-bool DynamixelHardwareInterface::setTorque(const bool enabled, const bool direct_write)
+bool DynamixelHardwareInterface::setTorque(const bool enabled, int retries, const bool direct_write)
 {
   std::lock_guard<std::mutex> lock(set_torque_mutex_);
 
@@ -620,6 +633,21 @@ bool DynamixelHardwareInterface::setTorque(const bool enabled, const bool direct
       DXL_LOG_ERROR("Failed to write goal positions before enabling torque. Cannot enable torque.");
       return false;
     }
+
+    // Re-read goal positions for verification
+    if (!cmd_read_manager_.read() || !cmd_read_manager_.isOk()) {
+      DXL_LOG_ERROR("Failed to read goal positions after enabling torque. Cannot verify goal positions.");
+      return false;
+    }
+
+    // Verify goal positions: current positions should match read goal positions
+    for (auto& [name, joint] : joints_) {
+      if (joint.joint_state.goal[hardware_interface::HW_IF_POSITION] !=
+          joint.dynamixel_goal_position) {
+        DXL_LOG_ERROR("Joint '" << name << "' goal position does not match read goal position after enabling torque.");
+        return false;
+      }
+    }
   } else {
     // unload all controllers of the joint
     auto ctrls = controller_orchestrator_->getActiveControllerOfHardwareInterface(get_name());
@@ -635,20 +663,34 @@ bool DynamixelHardwareInterface::setTorque(const bool enabled, const bool direct
   }
   DXL_LOG_INFO((enabled ? "Enabling" : "Disabling") << " motor torque.");
 
-  for (auto& [name, joint] : joints_) {
-    joint.torque = enabled;
-    if (direct_write && !joint.dynamixel->writeRegister(DXL_REGISTER_CMD_TORQUE, joint.torque)) {
-      return false;
+  bool success = false;
+  retries = std::max(retries, 1);  // Ensure at least one retry
+  int counter = 0;
+  while (counter <= retries && !success) {
+    success = true;
+    for (auto& [name, joint] : joints_) {
+      joint.torque = enabled;  // set torque of each joint -> also relevant for indirect write
+      if (direct_write && !joint.dynamixel->writeRegister(DXL_REGISTER_CMD_TORQUE, joint.torque)) {
+        success = false;
+        break;  // Break if direct write fails
+      }
+    }
+
+    if (!direct_write && !torque_write_manager_.write()) {
+      success = false;
+    }
+
+    counter++;
+    if (!success) {
+      DXL_LOG_WARN("Failed to set torque for all joints. Retrying... (" << counter << "/" << retries << ")");
     }
   }
-
-  if (!direct_write && !torque_write_manager_.write()) {
-    DXL_LOG_ERROR("Setting torque failed!");
-    return false;
+  if (success) {
+    is_torqued_ = enabled;
+    updateColorLED();
+    return true;
   }
-  is_torqued_ = enabled;
-  updateColorLED();
-  return true;
+  return false;
 }
 
 void DynamixelHardwareInterface::setColorLED(const int& red, const int& green, const int& blue)
