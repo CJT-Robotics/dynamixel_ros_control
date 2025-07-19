@@ -549,15 +549,21 @@ bool DynamixelHardwareInterface::setUpStatusReadManager()
 bool DynamixelHardwareInterface::setUpCmdReadManager()
 {
   cmd_read_manager_ = SyncReadManager();
-  DxlValueMappingList goal_cmd_mapping;
+  std::unordered_map<std::string, DxlValueMappingList> register_dynamixel_mappings;
   for (auto& [name, joint] : joints_) {
     cmd_read_manager_.addDynamixel(joint.dynamixel.get());
-    goal_cmd_mapping.push_back(
-        std::make_pair<Dynamixel*, DxlValue>(joint.dynamixel.get(), DxlValue(&joint.dynamixel_goal_position)));
+    for (auto& [interface_name, interface_value] : joint.read_goal_values_) {
+      std::string register_name = joint.commandInterfaceToRegisterName(interface_name);
+      register_dynamixel_mappings[register_name].push_back(
+          std::make_pair<Dynamixel*, DxlValue>(joint.dynamixel.get(), DxlValue(&interface_value)));
+    }
   }
 
-  cmd_read_manager_.addRegister(DXL_REGISTER_CMD_POSITION, goal_cmd_mapping);
-  return cmd_read_manager_.init(driver_);
+  for (const auto& [register_name, dynamixel_mapping] : register_dynamixel_mappings) {
+    cmd_read_manager_.addRegister(register_name, dynamixel_mapping);
+  }
+
+  return read_manager_.init(driver_);
 }
 bool DynamixelHardwareInterface::setUpTorqueWriteManager()
 {
@@ -617,53 +623,12 @@ bool DynamixelHardwareInterface::setTorque(const bool enabled, int retries, cons
   std::lock_guard<std::mutex> lock(set_torque_mutex_);
 
   if (enabled) {
-    // Read current positions
-    if (!read_manager_.read() || !read_manager_.isOk() || !isHardwareOk()) {
-      DXL_LOG_ERROR("Failed to read current positions before enabling torque. Cannot enable torque.");
+    // reset goal state before enabling torque && verify that goal positions are set correctly
+    if (!resetGoalStateAndVerify())
       return false;
-    }
-
-    // Set goal positions to current positions before enabling torque
-    for (auto& [name, joint] : joints_) {
-      joint.resetGoalState();
-    }
-
-    // Write goal positions
-    if (!control_write_manager_.write() || !control_write_manager_.isOk() || !isHardwareOk()) {
-      DXL_LOG_ERROR("Failed to write goal positions before enabling torque. Cannot enable torque.");
-      return false;
-    }
-
-    // Re-read goal positions for verification
-    if (!cmd_read_manager_.read() || !cmd_read_manager_.isOk()) {
-      DXL_LOG_ERROR("Failed to re-read goal positions before enabling torque. Cannot verify goal positions.");
-      return false;
-    }
-
-    // Verify goal positions: current positions should match read goal positions
-    for (auto& [name, joint] : joints_) {
-      DXL_LOG_INFO("Verifying goal position for joint '" << name << "' before enabling torque.");
-      if (!joint.isPositionControlled()|| joint.getPreferredPositionControlMode() == CURRENT_BASED_POSITION) continue;
-      if (std::abs(joint.actuator_state.goal[hardware_interface::HW_IF_POSITION] - joint.dynamixel_goal_position)>1e-2) {
-        DXL_LOG_ERROR("Joint '"
-                      << name << "' goal position does not match read goal position before enabling torque. (Current: "
-                      << joint.actuator_state.goal[hardware_interface::HW_IF_POSITION]
-                      << ", Read Goal Position: " << joint.dynamixel_goal_position << ")");
-        return false;
-      }
-      DXL_LOG_INFO("Joint '" << name << "' goal position verified before enabling torque. (Goal Position: "
-                   << joint.actuator_state.goal[hardware_interface::HW_IF_POSITION] << ")");
-    }
   } else {
     // unload all controllers of the joint
-    auto ctrls = controller_orchestrator_->getActiveControllerOfHardwareInterface(get_name());
-    if (!ctrls.empty()) {
-      std::stringstream ss;
-      ss << "Disabling torque for hardware interface '" << get_name()
-         << "'. -> Deactivating the following controllers: " << iterableToString(ctrls);
-      DXL_LOG_WARN(ss.str().c_str());
-    }
-    if (!controller_orchestrator_->deactivateControllers(ctrls)) {
+    if (!unloadControllers()) {
       DXL_LOG_ERROR("Failed to deactivate controllers before disabling torque. Disabling torque...");
     }
   }
@@ -697,6 +662,58 @@ bool DynamixelHardwareInterface::setTorque(const bool enabled, int retries, cons
     return true;
   }
   return false;
+}
+
+bool DynamixelHardwareInterface::resetGoalStateAndVerify()
+{
+  // Read current positions
+  if (!read_manager_.read() || !read_manager_.isOk() || !isHardwareOk()) {
+    DXL_LOG_ERROR("Failed to read current positions before enabling torque. Cannot enable torque.");
+    return false;
+  }
+
+  // Set goal positions to current positions before enabling torque
+  for (auto& [name, joint] : joints_) {
+    joint.resetGoalState();
+  }
+
+  // Write goal positions
+  if (!control_write_manager_.write() || !control_write_manager_.isOk() || !isHardwareOk()) {
+    DXL_LOG_ERROR("Failed to write goal positions before enabling torque. Cannot enable torque.");
+    return false;
+  }
+
+  // Re-read goal positions for verification
+  if (!cmd_read_manager_.read() || !cmd_read_manager_.isOk()) {
+    DXL_LOG_ERROR("Failed to re-read goal positions before enabling torque. Cannot verify goal positions.");
+    return false;
+  }
+
+  // Verify goal command values match the read values
+  for (auto& [name, joint] : joints_) {
+    for (const auto& interface_name : joint.getActiveCommandInterfaces()) {
+      const auto& interface_value = joint.read_goal_values_.at(interface_name);
+      DXL_LOG_INFO("Verifying goal position for joint '" << name << "' interface '");
+      if (std::abs(interface_value - joint.getActuatorState().goal[interface_name]) > 1e-2) {
+        DXL_LOG_ERROR("Joint '" << name << "' goal " << interface_name
+                                << " does not match read goal position before enabling torque. "
+                                << "(Current: " << joint.getActuatorState().goal[interface_name]
+                                << ", Read Goal Position: " << interface_value << ")");
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+bool DynamixelHardwareInterface::unloadControllers() const
+{
+  auto ctrls = controller_orchestrator_->getActiveControllerOfHardwareInterface(get_name());
+  if (!controller_orchestrator_->deactivateControllers(ctrls)) {
+    DXL_LOG_ERROR("Failed to deactivate controllers.");
+    return false;
+  }
+  return true;
 }
 
 void DynamixelHardwareInterface::setColorLED(const int& red, const int& green, const int& blue)
@@ -745,12 +762,10 @@ void DynamixelHardwareInterface::adjustTransmissionOffsetsCallback(
   DXL_LOG_INFO("Request to adjust transmission offsets received.");
   response->success = true;
 
-  auto ctrls = controller_orchestrator_->getActiveControllerOfHardwareInterface(get_name());
-  if (!controller_orchestrator_->deactivateControllers(ctrls)) {
-    DXL_LOG_ERROR("Failed to deactivate controllers. Cannot adjust offsets.");
+  if (!unloadControllers()) {
+    RCLCPP_INFO(get_logger(), "Failed to unload controllers. Cannot adjust offsets.");
     response->success = false;
     response->message = "Failed to deactivate controllers. Cannot adjust offsets.";
-    return;
   }
 
   for (size_t i = 0; i < request->external_joint_measurements.name.size(); ++i) {

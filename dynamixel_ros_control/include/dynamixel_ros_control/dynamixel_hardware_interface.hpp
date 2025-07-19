@@ -65,6 +65,8 @@ private:
   bool reboot() const;
 
   bool setTorque(bool enabled, int retries = 5, bool direct_write = false);
+  bool resetGoalStateAndVerify();
+  bool unloadControllers() const;
   void updateColorLED();
   void setColorLED(const int& red, const int& green, const int& blue);
   void setColorLED(const std::string& color);

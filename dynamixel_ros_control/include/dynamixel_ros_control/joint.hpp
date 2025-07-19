@@ -66,7 +66,7 @@ public:
   bool torque{false};
   State joint_state;
   State actuator_state;                 // Only used if there is a transmission
-  double dynamixel_goal_position{0.0};  // read from dynamixel, used to verify goal position before torque is enabled
+  std::unordered_map<std::string, double> read_goal_values_;  // read from dynamixel
   std::shared_ptr<transmission_interface::Transmission> state_transmission;
   std::shared_ptr<transmission_interface::Transmission> command_transmission;
   double estop_position{0.0};
