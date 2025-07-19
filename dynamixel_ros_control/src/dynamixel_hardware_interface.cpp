@@ -178,7 +178,7 @@ DynamixelHardwareInterface::on_configure(const rclcpp_lifecycle::State& previous
 
   // Set up sync read / write managers
   if (!setUpStatusReadManager() || !setUpStateReadManager() || !setUpTorqueWriteManager() ||
-      !setUpControlWriteManager()) {
+      !setUpControlWriteManager() || !setUpCmdReadManager()) {
     return hardware_interface::CallbackReturn::FAILURE;
   }
 
@@ -642,11 +642,16 @@ bool DynamixelHardwareInterface::setTorque(const bool enabled, int retries, cons
 
     // Verify goal positions: current positions should match read goal positions
     for (auto& [name, joint] : joints_) {
-      if (joint.joint_state.goal[hardware_interface::HW_IF_POSITION] !=
-          joint.dynamixel_goal_position) {
-        DXL_LOG_ERROR("Joint '" << name << "' goal position does not match read goal position before enabling torque.");
+      if (!joint.isPositionControlled()) continue;
+      if (std::abs(joint.actuator_state.goal[hardware_interface::HW_IF_POSITION] - joint.dynamixel_goal_position)>1e-2) {
+        DXL_LOG_ERROR("Joint '"
+                      << name << "' goal position does not match read goal position before enabling torque. (Current: "
+                      << joint.actuator_state.goal[hardware_interface::HW_IF_POSITION]
+                      << ", Read Goal Position: " << joint.dynamixel_goal_position << ")");
         return false;
       }
+      DXL_LOG_INFO("Joint '" << name << "' goal position verified before enabling torque. (Goal Position: "
+                   << joint.actuator_state.goal[hardware_interface::HW_IF_POSITION] << ")");
     }
   } else {
     // unload all controllers of the joint
