@@ -653,7 +653,7 @@ bool DynamixelHardwareInterface::setTorque(const bool enabled, int retries, cons
 
     counter++;
     if (!success) {
-      DXL_LOG_WARN("Failed to set torque for all joints. Retrying... (" << counter << "of " << retries << ")");
+      DXL_LOG_WARN("Failed to set torque for all joints. Retrying... (" << counter << " of " << retries << ")");
     }
   }
   if (success) {
@@ -693,7 +693,7 @@ bool DynamixelHardwareInterface::resetGoalStateAndVerify()
   for (auto& [name, joint] : joints_) {
     for (const auto& interface_name : joint.getActiveCommandInterfaces()) {
       const auto& interface_value = joint.read_goal_values_.at(interface_name);
-      DXL_LOG_INFO("Verifying goal position for joint '" << name << "' interface '"<< interface_name );
+      DXL_LOG_INFO("Verifying goal position for joint " << name << " interface " << interface_name);
       if (std::abs(interface_value - joint.getActuatorState().goal[interface_name]) > 1e-2) {
         DXL_LOG_ERROR("Joint '" << name << "' goal " << interface_name
                                 << " does not match read goal position before enabling torque. "
@@ -763,7 +763,7 @@ void DynamixelHardwareInterface::adjustTransmissionOffsetsCallback(
   response->success = true;
 
   if (!unloadControllers()) {
-    DXL_LOG_INFO( "Failed to unload controllers. Cannot adjust offsets.");
+    DXL_LOG_INFO("Failed to unload controllers. Cannot adjust offsets.");
     response->success = false;
     response->message = "Failed to deactivate controllers. Cannot adjust offsets.";
   }
