@@ -642,7 +642,8 @@ bool DynamixelHardwareInterface::setTorque(const bool enabled, int retries, cons
 
     // Verify goal positions: current positions should match read goal positions
     for (auto& [name, joint] : joints_) {
-      if (!joint.isPositionControlled()) continue;
+      DXL_LOG_INFO("Verifying goal position for joint '" << name << "' before enabling torque.");
+      if (!joint.isPositionControlled()|| joint.getPreferredPositionControlMode() == CURRENT_BASED_POSITION) continue;
       if (std::abs(joint.actuator_state.goal[hardware_interface::HW_IF_POSITION] - joint.dynamixel_goal_position)>1e-2) {
         DXL_LOG_ERROR("Joint '"
                       << name << "' goal position does not match read goal position before enabling torque. (Current: "

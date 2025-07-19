@@ -51,6 +51,11 @@ public:
    */
   State& getActuatorState();
 
+  ControlMode getPreferredPositionControlMode() const
+  {
+    return preferred_position_control_mode_;
+  }
+
   // Parameters
   std::string name;
   std::shared_ptr<Dynamixel> dynamixel;
