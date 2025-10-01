@@ -121,10 +121,10 @@ DynamixelHardwareInterface::on_init(const hardware_interface::HardwareInfo& hard
     joints_.emplace(joint.name, std::move(joint));
   }
 
-  // create and spinn a ros2 node in a separate thread (making sure it gets a separate name)
-  // TODO: for now: hacky solution for preventing name conflicts while ensuring namespace is set correctly
+  // create and spinn a ros2 node in a separate thread
+  // (making sure it gets a separate name but the same namespace as the controller manager)
   auto tmp_node = rclcpp::Node::make_shared("dynamixel_ros_control_node");
-  std::string ns = std::string(tmp_node->get_namespace());
+  auto ns = std::string(tmp_node->get_namespace());
   node_ = std::make_shared<rclcpp::Node>(hardware_info.name, ns, rclcpp::NodeOptions().use_global_arguments(false));
   exe_ = std::make_shared<rclcpp::executors::MultiThreadedExecutor>();
   exe_->add_node(node_);
@@ -324,6 +324,8 @@ DynamixelHardwareInterface::perform_command_mode_switch(const std::vector<std::s
     DXL_LOG_ERROR("No successful read() before a controller is loaded.");
     return hardware_interface::return_type::ERROR;
   }
+
+  // TODO: !! Reset goal states! (Before switching the control mode -> reset the goal values of the desired currently inactive interface!)
 
   // Start & stop interfaces
   if (!processCommandInterfaceUpdates(start_interfaces, false)) {
@@ -552,10 +554,13 @@ bool DynamixelHardwareInterface::setUpCmdReadManager()
   std::unordered_map<std::string, DxlValueMappingList> register_dynamixel_mappings;
   for (auto& [name, joint] : joints_) {
     cmd_read_manager_.addDynamixel(joint.dynamixel.get());
-    for (auto& [interface_name, interface_value] : joint.read_goal_values_) {
-      std::string register_name = joint.commandInterfaceToRegisterName(interface_name);
-      register_dynamixel_mappings[register_name].push_back(
-          std::make_pair<Dynamixel*, DxlValue>(joint.dynamixel.get(), DxlValue(&interface_value)));
+    for (auto& cmd_interface : joint.getAvailableCommandInterfaces()) {
+      DXL_LOG_WARN("SetupCmdReadManager: Registering command interface '" << cmd_interface << "' for joint '"
+                                                                          << joint.name << "'");
+      joint.read_goal_values_[cmd_interface] = std::numeric_limits<double>::quiet_NaN();  // Initialize read goal values
+      std::string register_name = joint.commandInterfaceToRegisterName(cmd_interface);
+      register_dynamixel_mappings[register_name].push_back(std::make_pair<Dynamixel*, DxlValue>(
+          joint.dynamixel.get(), DxlValue(&joint.read_goal_values_.at(cmd_interface))));
     }
   }
 
@@ -666,32 +671,42 @@ bool DynamixelHardwareInterface::setTorque(const bool enabled, int retries, cons
 
 bool DynamixelHardwareInterface::resetGoalStateAndVerify()
 {
-  // Read current positions
+  // Read current values (positions, velocities, etc.) before enabling torque
   if (!read_manager_.read() || !read_manager_.isOk() || !isHardwareOk()) {
     DXL_LOG_ERROR("Failed to read current positions before enabling torque. Cannot enable torque.");
     return false;
   }
 
-  // Set goal positions to current positions before enabling torque
+  // reset goal state -> goal position = current position, goal velocity = 0, etc.
   for (auto& [name, joint] : joints_) {
     joint.resetGoalState();
   }
 
-  // Write goal positions
+  // Write goal positions (will only write for the values belonging to the active command interfaces!)
   if (!control_write_manager_.write() || !control_write_manager_.isOk() || !isHardwareOk()) {
     DXL_LOG_ERROR("Failed to write goal positions before enabling torque. Cannot enable torque.");
     return false;
   }
 
-  // Re-read goal positions for verification
+  // Re-read goal values for verification
   if (!cmd_read_manager_.read() || !cmd_read_manager_.isOk()) {
     DXL_LOG_ERROR("Failed to re-read goal positions before enabling torque. Cannot verify goal positions.");
     return false;
   }
 
-  // Verify goal command values match the read values
+  // Verify goal command values match the read values (for active command interfaces)
   for (auto& [name, joint] : joints_) {
     for (const auto& interface_name : joint.getActiveCommandInterfaces()) {
+      if (joint.read_goal_values_.count(interface_name) == 0) {
+        DXL_LOG_ERROR("Joint '" << name << "' does not have read goal values for interface '" << interface_name
+                                << "'. Cannot verify goal position.");
+        std::stringstream ss;
+        ss << "Available interfaces: ";
+        for (const auto& [fst, snd] : joint.read_goal_values_) {
+          ss << fst << ", ";
+        }
+        return false;
+      }
       const auto& interface_value = joint.read_goal_values_.at(interface_name);
       DXL_LOG_INFO("Verifying goal position for joint " << name << " interface " << interface_name);
       if (std::abs(interface_value - joint.getActuatorState().goal[interface_name]) > 1e-2) {
