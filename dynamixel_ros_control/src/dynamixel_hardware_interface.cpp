@@ -325,7 +325,10 @@ DynamixelHardwareInterface::perform_command_mode_switch(const std::vector<std::s
     return hardware_interface::return_type::ERROR;
   }
 
-  // TODO: !! Reset goal states! (Before switching the control mode -> reset the goal values of the desired currently inactive interface!)
+  // Reset all goal states and verify that the cmds were written correctly
+  if (!resetGoalStateAndVerify()) {
+    return hardware_interface::return_type::ERROR;
+  }
 
   // Start & stop interfaces
   if (!processCommandInterfaceUpdates(start_interfaces, false)) {
@@ -696,10 +699,10 @@ bool DynamixelHardwareInterface::resetGoalStateAndVerify()
 
   // Verify goal command values match the read values (for active command interfaces)
   for (auto& [name, joint] : joints_) {
-    for (const auto& interface_name : joint.getActiveCommandInterfaces()) {
+    for (const auto& interface_name : joint.getAvailableCommandInterfaces()) {
       if (joint.read_goal_values_.count(interface_name) == 0) {
         DXL_LOG_ERROR("Joint '" << name << "' does not have read goal values for interface '" << interface_name
-                                << "'. Cannot verify goal position.");
+                                << "'. Cannot verify goal position."); // TODO: remove
         std::stringstream ss;
         ss << "Available interfaces: ";
         for (const auto& [fst, snd] : joint.read_goal_values_) {
@@ -708,7 +711,7 @@ bool DynamixelHardwareInterface::resetGoalStateAndVerify()
         return false;
       }
       const auto& interface_value = joint.read_goal_values_.at(interface_name);
-      DXL_LOG_INFO("Verifying goal position for joint " << name << " interface " << interface_name);
+      DXL_LOG_INFO("Verifying goal values for joint " << name << " interface " << interface_name); // TODO: remove
       if (std::abs(interface_value - joint.getActuatorState().goal[interface_name]) > 1e-2) {
         DXL_LOG_ERROR("Joint '" << name << "' goal " << interface_name
                                 << " does not match read goal position before enabling torque. "
