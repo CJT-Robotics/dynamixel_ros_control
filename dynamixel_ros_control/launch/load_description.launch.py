@@ -11,7 +11,8 @@ def generate_launch_description():
     # Parameters
     port_name_arg = DeclareLaunchArgument(
         name='port_name',
-        default_value='/dev/ttyUSB0',
+        default_value='/dev/ttyACM0',
+                      # '/dev/ttyUSB0',
         description='Path to USB serial converter device'
     )
     ld.add_action(port_name_arg)

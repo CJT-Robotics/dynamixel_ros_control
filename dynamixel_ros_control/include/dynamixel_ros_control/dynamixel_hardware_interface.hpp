@@ -13,6 +13,7 @@
 #include <transmission_interface/transmission.hpp>
 #include <hector_transmission_interface_msgs/srv/adjust_transmission_offsets.hpp>
 #include <controller_orchestrator/controller_orchestrator.hpp>
+#include <hardware_interface/hardware_interface/types/lifecycle_state_names.hpp>
 namespace dynamixel_ros_control {
 
 class DynamixelHardwareInterface : public hardware_interface::SystemInterface
@@ -68,7 +69,7 @@ private:
   bool setTorque(bool enabled, int retries = 5, bool direct_write = false);
   bool resetGoalStateAndVerify();
   bool unloadControllers() const;
-  void updateColorLED();
+  void updateColorLED(std::string new_state="");
   void setColorLED(const int& red, const int& green, const int& blue);
   void setColorLED(const std::string& color);
   void adjustTransmissionOffsetsCallback(

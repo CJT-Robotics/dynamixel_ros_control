@@ -185,6 +185,8 @@ DynamixelHardwareInterface::on_configure(const rclcpp_lifecycle::State& previous
   // if (torque) {
   //   setTorque(true);
   // }
+  DXL_LOG_INFO("Dynamixel hardware interface configured successfully."); // TODO: remove
+  updateColorLED(hardware_interface::lifecycle_state_names::INACTIVE);
 
   return CallbackReturn::SUCCESS;
 }
@@ -227,7 +229,10 @@ hardware_interface::CallbackReturn DynamixelHardwareInterface::on_activate(const
       return CallbackReturn::ERROR;
     }
   }
-  updateColorLED();
+  if (!resetGoalStateAndVerify()) {
+    return CallbackReturn::ERROR;
+  }
+  updateColorLED(hardware_interface::lifecycle_state_names::ACTIVE);
   return CallbackReturn::SUCCESS;
 }
 
@@ -240,7 +245,7 @@ DynamixelHardwareInterface::on_deactivate(const rclcpp_lifecycle::State& previou
       return CallbackReturn::ERROR;
     }
   }
-  updateColorLED();
+  updateColorLED(hardware_interface::lifecycle_state_names::INACTIVE);
   return CallbackReturn::SUCCESS;
 }
 
@@ -343,16 +348,17 @@ DynamixelHardwareInterface::perform_command_mode_switch(const std::vector<std::s
     return hardware_interface::return_type::ERROR;
   }
 
-  // Reset all goal states and verify that the cmds were written correctly
-  if (!resetGoalStateAndVerify()) {
-    return hardware_interface::return_type::ERROR;
-  }
 
   // Start & stop interfaces
   if (!processCommandInterfaceUpdates(start_interfaces, false)) {
     return hardware_interface::return_type::ERROR;
   }
   if (!processCommandInterfaceUpdates(stop_interfaces, true)) {
+    return hardware_interface::return_type::ERROR;
+  }
+
+  // Reset all goal states and verify that the cmds were written correctly
+  if (!resetGoalStateAndVerify()) {
     return hardware_interface::return_type::ERROR;
   }
 
@@ -409,7 +415,7 @@ hardware_interface::return_type DynamixelHardwareInterface::read(const rclcpp::T
       joint.state_transmission->actuator_to_joint();
     }
 
-    if (!first_read_successful_ || joint.controlModeChanged()) {
+    if (!first_read_successful_ || joint.controlModeChanged()) { // TODO: Change omnly reset on first read necessary
       joint.resetGoalState();
       joint.resetControlModeChanged();
     }
@@ -765,6 +771,7 @@ void DynamixelHardwareInterface::setColorLED(const int& red, const int& green, c
 
 void DynamixelHardwareInterface::setColorLED(const std::string& color)
 {
+  DXL_LOG_INFO("Setting color LED '" << color << "'");
   if (color == COLOR_RED) {
     setColorLED(COLOR_RED_VALUES[0], COLOR_RED_VALUES[1], COLOR_RED_VALUES[2]);
   } else if (color == COLOR_GREEN) {
@@ -776,10 +783,12 @@ void DynamixelHardwareInterface::setColorLED(const std::string& color)
   }
 }
 
-void DynamixelHardwareInterface::updateColorLED()
+void DynamixelHardwareInterface::updateColorLED(std::string new_state)
 {
-  if (lifecycle_state_.label() == hardware_interface::lifecycle_state_names::UNCONFIGURED ||
-      lifecycle_state_.label() == hardware_interface::lifecycle_state_names::INACTIVE) {
+  if (new_state.empty()) new_state = lifecycle_state_.label();
+  if (new_state == hardware_interface::lifecycle_state_names::UNCONFIGURED ||
+      new_state == hardware_interface::lifecycle_state_names::INACTIVE
+     ) {
     setColorLED(COLOR_RED);
   } else {
     // hardware interface is active
