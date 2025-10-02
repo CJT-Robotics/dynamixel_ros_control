@@ -415,9 +415,9 @@ hardware_interface::return_type DynamixelHardwareInterface::read(const rclcpp::T
       joint.state_transmission->actuator_to_joint();
     }
 
-    if (!first_read_successful_ || joint.controlModeChanged()) { // TODO: Change omnly reset on first read necessary
+    // reset after first read (e.g. goal position = current position)
+    if (!first_read_successful_ ) {
       joint.resetGoalState();
-      joint.resetControlModeChanged();
     }
   }
 
@@ -435,19 +435,13 @@ hardware_interface::return_type DynamixelHardwareInterface::write(const rclcpp::
     return hardware_interface::return_type::OK;
   }
   // Wait for a successful read after changing the control mode
-  bool control_mode_changed = false;
   for (auto& [name, joint] : joints_) {
     if (joint.command_transmission) {
       joint.command_transmission->joint_to_actuator();
     }
-
-    if (joint.controlModeChanged()) {
-      control_mode_changed = true;
-      break;
-    }
   }
 
-  if (!first_read_successful_ || control_mode_changed) {
+  if (!first_read_successful_ ) {
     // DXL_LOG_ERROR("Write called without successful read. This should not happen.");
     return hardware_interface::return_type::OK;
   }
