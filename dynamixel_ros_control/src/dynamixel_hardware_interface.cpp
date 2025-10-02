@@ -189,6 +189,24 @@ DynamixelHardwareInterface::on_configure(const rclcpp_lifecycle::State& previous
   return CallbackReturn::SUCCESS;
 }
 
+DynamixelHardwareInterface::~DynamixelHardwareInterface()
+{
+  try {
+    if (exe_) {
+      exe_->cancel();
+      if (node_) {
+        try { exe_->remove_node(node_); } catch (...) {}
+      }
+    }
+    if (exe_thread_.joinable()) {
+      exe_thread_.join();
+    }
+  } catch (...) {
+  }
+  exe_.reset();
+  node_.reset();
+}
+
 hardware_interface::CallbackReturn DynamixelHardwareInterface::on_cleanup(const rclcpp_lifecycle::State& previous_state)
 {
   DXL_LOG_DEBUG("DynamixelHardwareInterface::on_cleanup from " << previous_state.label());
