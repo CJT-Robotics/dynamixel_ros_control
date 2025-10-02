@@ -1,0 +1,64 @@
+/**:
+  controller_manager:
+    ros__parameters:
+      update_rate: 25 # Hz
+
+      joint_state_broadcaster:
+        type: joint_state_broadcaster/JointStateBroadcaster
+
+      velocity_to_position_controller:
+        type: velocity_to_position_command_controller/VelocityToPositionCommandController
+
+      velocity_controller:
+        type: velocity_controllers/JointGroupVelocityController
+
+      position_controller:
+        type: position_controllers/JointGroupPositionController
+
+      compliance_controller:
+        type: apply_current_limit_controller/ApplyCurrentLimitController
+
+      trajectory_controller:
+        type: joint_trajectory_controller/JointTrajectoryController
+
+      multi_interface_controller:
+        type: forward_command_controller/MultiInterfaceForwardCommandController
+
+  multi_interface_controller:
+    ros__parameters:
+      joint: "joint_1"
+      interface_names:
+      - position
+      - velocity
+      - current
+
+  velocity_to_position_controller:
+    ros__parameters:
+      joints:
+      - compliance_controller/joint_1
+
+  velocity_controller:
+    ros__parameters:
+      joints:
+      - joint_1
+
+  compliance_controller:
+    ros_parameters:
+      joints:
+      - joint_1
+
+  position_controller:
+    ros__parameters:
+      joints:
+      - compliance_controller/joint_1
+
+  trajectory_controller:
+    ros__parameters:
+      joints:
+      - compliance_controller/joint_1
+
+      command_interfaces:
+      - position
+      state_interfaces:
+      - position
+      - velocity
