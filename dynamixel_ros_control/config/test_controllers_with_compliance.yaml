@@ -28,37 +28,41 @@
     ros__parameters:
       joint: "joint_1"
       interface_names:
-      - position
-      - velocity
-      - current
+        - position
+        - velocity
+        - current
 
   velocity_to_position_controller:
     ros__parameters:
       joints:
-      - compliance_controller/joint_1
+        - compliance_controller/joint_1
 
   velocity_controller:
     ros__parameters:
       joints:
-      - joint_1
+        - joint_1
 
   compliance_controller:
-    ros_parameters:
+    ros__parameters:
       joints:
-      - joint_1
+        - joint_1
+      current_limits:
+        joint_1:
+          compliant_limit: 0.5  # Amps
+          stiff_limit: 4.0     # Amps
 
   position_controller:
     ros__parameters:
       joints:
-      - compliance_controller/joint_1
+        - compliance_controller/joint_1
 
   trajectory_controller:
     ros__parameters:
       joints:
-      - compliance_controller/joint_1
+        - compliance_controller/joint_1
 
       command_interfaces:
-      - position
+        - position
       state_interfaces:
-      - position
-      - velocity
+        - position
+        - velocity

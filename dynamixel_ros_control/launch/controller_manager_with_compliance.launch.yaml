@@ -24,20 +24,20 @@ launch:
             respawn_delay: 5.0
 
     # Controllers
-    - node:
-            pkg: "controller_manager"
-            exec: "spawner"
-            name: "joint_state_broadcaster_spawner"
-            output: "screen"
-            args: "joint_state_broadcaster"
-            respawn: "true"
-            respawn_delay: 5.0
+#    - node:
+#            pkg: "controller_manager"
+#            exec: "spawner"
+#            name: "joint_state_broadcaster_spawner"
+#            output: "screen"
+#            args: "joint_state_broadcaster"
+#            respawn: "true"
+#            respawn_delay: 5.0
 
     - node:
             pkg: "controller_manager"
             exec: "spawner"
             name: "position_controller_spawner"
             output: "screen"
-            args: "--activate-as-group compliance_controller position_controller"
+            args: "--activate-as-group compliance_controller"
             param:
                 - from: "$(find-pkg-share dynamixel_ros_control)/config/test_controllers_with_compliance.yaml"
