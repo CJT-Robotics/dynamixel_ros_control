@@ -66,7 +66,7 @@ private:
   bool isHardwareOk() const;
   bool reboot() const;
 
-  bool setTorque(bool enabled, int retries = 5, bool direct_write = false);
+  bool setTorque(bool do_enable, int retries = 5, bool direct_write = false);
   bool resetGoalStateAndVerify();
   bool unloadControllers() const;
   void updateColorLED(std::string new_state="");
