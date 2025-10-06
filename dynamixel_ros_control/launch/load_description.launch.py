@@ -11,7 +11,8 @@ def generate_launch_description():
     # Parameters
     port_name_arg = DeclareLaunchArgument(
         name='port_name',
-        default_value='/dev/ttyUSB0',
+        default_value='/dev/ttyACM0',
+                      # '/dev/ttyUSB0',
         description='Path to USB serial converter device'
     )
     ld.add_action(port_name_arg)
@@ -27,7 +28,7 @@ def generate_launch_description():
 
     id_arg = DeclareLaunchArgument(
         name='id',
-        default_value='1',
+        default_value='16',
         description='ID of the dynamixel to control'
     )
     ld.add_action(id_arg)

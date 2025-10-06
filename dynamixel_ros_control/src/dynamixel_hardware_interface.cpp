@@ -33,7 +33,8 @@ std::unordered_map<std::string, std::string> loadInterfaceRegisterTranslationMap
 }
 
 bool loadInterfaceRegisterNameTranslation(std::unordered_map<std::string, std::string>& state_interface_to_register,
-                                          std::unordered_map<std::string, std::string>& command_interface_to_register)
+                                          std::unordered_map<std::string, std::string>& command_interface_to_register,
+                                          std::unordered_map<std::string, std::string>& interface_to_register_limits)
 {
   std::string package_path_ = ament_index_cpp::get_package_share_directory("dynamixel_ros_control");
   const std::string path = package_path_ + "/devices/interface_to_register_names.yaml";
@@ -52,6 +53,7 @@ bool loadInterfaceRegisterNameTranslation(std::unordered_map<std::string, std::s
 
   state_interface_to_register = loadInterfaceRegisterTranslationMap(config["state_interfaces"]);
   command_interface_to_register = loadInterfaceRegisterTranslationMap(config["command_interfaces"]);
+  interface_to_register_limits = loadInterfaceRegisterTranslationMap(config["limits"]);
   return true;
 }
 
@@ -97,7 +99,9 @@ DynamixelHardwareInterface::on_init(const hardware_interface::HardwareInfo& hard
   // Interface to register translation
   std::unordered_map<std::string, std::string> state_interface_to_register;
   std::unordered_map<std::string, std::string> command_interface_to_register;
-  if (!loadInterfaceRegisterNameTranslation(state_interface_to_register, command_interface_to_register)) {
+  std::unordered_map<std::string, std::string> interface_to_register_limits;  // e.g. velocity and current limits
+  if (!loadInterfaceRegisterNameTranslation(state_interface_to_register, command_interface_to_register,
+                                            interface_to_register_limits)) {
     return hardware_interface::CallbackReturn::ERROR;
   }
 
@@ -105,7 +109,7 @@ DynamixelHardwareInterface::on_init(const hardware_interface::HardwareInfo& hard
   joints_.reserve(info_.joints.size());
   for (const auto& joint_info : info_.joints) {
     Joint joint;
-    if (!joint.loadConfiguration(driver_, joint_info, state_interface_to_register, command_interface_to_register)) {
+    if (!joint.loadConfiguration(driver_, joint_info, state_interface_to_register, command_interface_to_register, interface_to_register_limits)) {
       return hardware_interface::CallbackReturn::ERROR;
     }
     std::stringstream ss;
@@ -121,10 +125,10 @@ DynamixelHardwareInterface::on_init(const hardware_interface::HardwareInfo& hard
     joints_.emplace(joint.name, std::move(joint));
   }
 
-  // create and spinn a ros2 node in a separate thread (making sure it gets a separate name)
-  // TODO: for now: hacky solution for preventing name conflicts while ensuring namespace is set correctly
+  // create and spinn a ros2 node in a separate thread
+  // (making sure it gets a separate name but the same namespace as the controller manager)
   auto tmp_node = rclcpp::Node::make_shared("dynamixel_ros_control_node");
-  std::string ns = std::string(tmp_node->get_namespace());
+  auto ns = std::string(tmp_node->get_namespace());
   node_ = std::make_shared<rclcpp::Node>(hardware_info.name, ns, rclcpp::NodeOptions().use_global_arguments(false));
   exe_ = std::make_shared<rclcpp::executors::MultiThreadedExecutor>();
   exe_->add_node(node_);
@@ -178,15 +182,39 @@ DynamixelHardwareInterface::on_configure(const rclcpp_lifecycle::State& previous
 
   // Set up sync read / write managers
   if (!setUpStatusReadManager() || !setUpStateReadManager() || !setUpTorqueWriteManager() ||
-      !setUpControlWriteManager()) {
+      !setUpControlWriteManager() || !setUpCmdReadManager()) {
     return hardware_interface::CallbackReturn::FAILURE;
   }
 
   // if (torque) {
   //   setTorque(true);
   // }
+  updateColorLED(hardware_interface::lifecycle_state_names::INACTIVE);
 
   return CallbackReturn::SUCCESS;
+}
+
+DynamixelHardwareInterface::~DynamixelHardwareInterface()
+{
+  try {
+    if (exe_) {
+      exe_->cancel();
+      if (node_) {
+        try {
+          exe_->remove_node(node_);
+        }
+        catch (...) {
+        }
+      }
+    }
+    if (exe_thread_.joinable()) {
+      exe_thread_.join();
+    }
+  }
+  catch (...) {
+  }
+  exe_.reset();
+  node_.reset();
 }
 
 hardware_interface::CallbackReturn DynamixelHardwareInterface::on_cleanup(const rclcpp_lifecycle::State& previous_state)
@@ -209,7 +237,10 @@ hardware_interface::CallbackReturn DynamixelHardwareInterface::on_activate(const
       return CallbackReturn::ERROR;
     }
   }
-  updateColorLED();
+  if (!resetGoalStateAndVerify()) {
+    return CallbackReturn::ERROR;
+  }
+  updateColorLED(hardware_interface::lifecycle_state_names::ACTIVE);
   return CallbackReturn::SUCCESS;
 }
 
@@ -222,7 +253,7 @@ DynamixelHardwareInterface::on_deactivate(const rclcpp_lifecycle::State& previou
       return CallbackReturn::ERROR;
     }
   }
-  updateColorLED();
+  updateColorLED(hardware_interface::lifecycle_state_names::INACTIVE);
   return CallbackReturn::SUCCESS;
 }
 
@@ -333,6 +364,11 @@ DynamixelHardwareInterface::perform_command_mode_switch(const std::vector<std::s
     return hardware_interface::return_type::ERROR;
   }
 
+  // Reset all goal states and verify that the cmds were written correctly
+  if (!resetGoalStateAndVerify()) {
+    return hardware_interface::return_type::ERROR;
+  }
+
   // Write control mode
   for (auto& [name, joint] : joints_) {
     if (!joint.updateControlMode()) {
@@ -386,9 +422,9 @@ hardware_interface::return_type DynamixelHardwareInterface::read(const rclcpp::T
       joint.state_transmission->actuator_to_joint();
     }
 
-    if (!first_read_successful_ || joint.controlModeChanged()) {
+    // reset after first read (e.g. goal position = current position)
+    if (!first_read_successful_) {
       joint.resetGoalState();
-      joint.resetControlModeChanged();
     }
   }
 
@@ -406,19 +442,13 @@ hardware_interface::return_type DynamixelHardwareInterface::write(const rclcpp::
     return hardware_interface::return_type::OK;
   }
   // Wait for a successful read after changing the control mode
-  bool control_mode_changed = false;
   for (auto& [name, joint] : joints_) {
     if (joint.command_transmission) {
       joint.command_transmission->joint_to_actuator();
     }
-
-    if (joint.controlModeChanged()) {
-      control_mode_changed = true;
-      break;
-    }
   }
 
-  if (!first_read_successful_ || control_mode_changed) {
+  if (!first_read_successful_) {
     // DXL_LOG_ERROR("Write called without successful read. This should not happen.");
     return hardware_interface::return_type::OK;
   }
@@ -546,6 +576,28 @@ bool DynamixelHardwareInterface::setUpStatusReadManager()
   status_read_manager_.addRegister(DXL_REGISTER_HARDWARE_ERROR, status_mapping);
   return status_read_manager_.init(driver_);
 }
+bool DynamixelHardwareInterface::setUpCmdReadManager()
+{
+  cmd_read_manager_ = SyncReadManager();
+  std::unordered_map<std::string, DxlValueMappingList> register_dynamixel_mappings;
+  for (auto& [name, joint] : joints_) {
+    cmd_read_manager_.addDynamixel(joint.dynamixel.get());
+    for (auto& cmd_interface : joint.getAvailableCommandInterfaces()) {
+      DXL_LOG_WARN("SetupCmdReadManager: Registering command interface '" << cmd_interface << "' for joint '"
+                                                                          << joint.name << "'");
+      joint.read_goal_values_[cmd_interface] = std::numeric_limits<double>::quiet_NaN();  // Initialize read goal values
+      std::string register_name = joint.commandInterfaceToRegisterName(cmd_interface);
+      register_dynamixel_mappings[register_name].push_back(std::make_pair<Dynamixel*, DxlValue>(
+          joint.dynamixel.get(), DxlValue(&joint.read_goal_values_.at(cmd_interface))));
+    }
+  }
+
+  for (const auto& [register_name, dynamixel_mapping] : register_dynamixel_mappings) {
+    cmd_read_manager_.addRegister(register_name, dynamixel_mapping);
+  }
+
+  return cmd_read_manager_.init(driver_);
+}
 bool DynamixelHardwareInterface::setUpTorqueWriteManager()
 {
   torque_write_manager_ = SyncWriteManager();
@@ -599,55 +651,104 @@ bool DynamixelHardwareInterface::reboot() const
   return true;
 }
 
-bool DynamixelHardwareInterface::setTorque(const bool enabled, const bool direct_write)
+bool DynamixelHardwareInterface::setTorque(const bool enabled, int retries, const bool direct_write)
 {
   std::lock_guard<std::mutex> lock(set_torque_mutex_);
 
   if (enabled) {
-    // Read current positions
-    if (!read_manager_.read() || !read_manager_.isOk() || !isHardwareOk()) {
-      DXL_LOG_ERROR("Failed to read current positions before enabling torque. Cannot enable torque.");
+    // reset goal state before enabling torque && verify that goal positions are set correctly
+    if (!resetGoalStateAndVerify())
       return false;
-    }
-
-    // Set goal positions to current positions before enabling torque
-    for (auto& [name, joint] : joints_) {
-      joint.resetGoalState();
-    }
-
-    // Write goal positions
-    if (!control_write_manager_.write() || !control_write_manager_.isOk() || !isHardwareOk()) {
-      DXL_LOG_ERROR("Failed to write goal positions before enabling torque. Cannot enable torque.");
-      return false;
-    }
   } else {
     // unload all controllers of the joint
-    auto ctrls = controller_orchestrator_->getActiveControllerOfHardwareInterface(get_name());
-    if (!ctrls.empty()) {
-      std::stringstream ss;
-      ss << "Disabling torque for hardware interface '" << get_name()
-         << "'. -> Deactivating the following controllers: " << iterableToString(ctrls);
-      DXL_LOG_WARN(ss.str().c_str());
-    }
-    if (!controller_orchestrator_->deactivateControllers(ctrls)) {
+    if (!unloadControllers()) {
       DXL_LOG_ERROR("Failed to deactivate controllers before disabling torque. Disabling torque...");
     }
   }
   DXL_LOG_INFO((enabled ? "Enabling" : "Disabling") << " motor torque.");
 
-  for (auto& [name, joint] : joints_) {
-    joint.torque = enabled;
-    if (direct_write && !joint.dynamixel->writeRegister(DXL_REGISTER_CMD_TORQUE, joint.torque)) {
-      return false;
+  bool success = false;
+  retries = std::max(retries, 1);  // ensure at least one attempt
+  int counter = 0;
+  while (counter < retries && !success) {
+    success = true;
+    for (auto& [name, joint] : joints_) {
+      joint.torque = enabled;  // set torque of each joint -> also relevant for indirect write
+      if (direct_write && !joint.dynamixel->writeRegister(DXL_REGISTER_CMD_TORQUE, joint.torque)) {
+        success = false;
+        break;  // Break if direct write fails
+      }
+    }
+
+    if (!direct_write && !torque_write_manager_.write()) {
+      success = false;
+    }
+
+    counter++;
+    if (!success) {
+      DXL_LOG_WARN("Failed to set torque for all joints. Retrying... (" << counter << " of " << retries << ")");
     }
   }
+  if (success) {
+    is_torqued_ = enabled;
+    updateColorLED();
+    return true;
+  }
+  return false;
+}
 
-  if (!direct_write && !torque_write_manager_.write()) {
-    DXL_LOG_ERROR("Setting torque failed!");
+bool DynamixelHardwareInterface::resetGoalStateAndVerify()
+{
+  // Read current values (positions, velocities, etc.) before enabling torque
+  if (!read_manager_.read() || !read_manager_.isOk() || !isHardwareOk()) {
+    DXL_LOG_ERROR("Failed to read current positions before enabling torque. Cannot enable torque.");
     return false;
   }
-  is_torqued_ = enabled;
-  updateColorLED();
+
+  // reset goal state -> goal position = current position, goal velocity = 0, etc.
+  for (auto& [name, joint] : joints_) {
+    joint.resetGoalState();
+  }
+
+  // Write goal positions (will only write for the values belonging to the active command interfaces!)
+  if (!control_write_manager_.write() || !control_write_manager_.isOk() || !isHardwareOk()) {
+    DXL_LOG_ERROR("Failed to write goal positions before enabling torque. Cannot enable torque.");
+    return false;
+  }
+
+  // Re-read goal values for verification
+  if (!cmd_read_manager_.read() || !cmd_read_manager_.isOk()) {
+    DXL_LOG_ERROR("Failed to re-read goal positions before enabling torque. Cannot verify goal positions.");
+    return false;
+  }
+
+  // Verify goal command values match the read values (for active command interfaces)
+  for (auto& [name, joint] : joints_) {
+    for (const auto& interface_name : joint.getAvailableCommandInterfaces()) {
+      if (joint.read_goal_values_.count(interface_name) == 0) {
+        DXL_LOG_ERROR("Cannot verify cmd values from motor "<<name<<"!");
+        return false;
+      }
+      const auto& interface_value = joint.read_goal_values_.at(interface_name);
+      if (std::abs(interface_value - joint.getActuatorState().goal[interface_name]) > 1e-2) {
+        DXL_LOG_ERROR("Joint '" << name << "' goal " << interface_name
+                                << " does not match read goal position before enabling torque. "
+                                << "(Current: " << joint.getActuatorState().goal[interface_name]
+                                << ", Read Goal Position: " << interface_value << ")");
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+bool DynamixelHardwareInterface::unloadControllers() const
+{
+  auto ctrls = controller_orchestrator_->getActiveControllerOfHardwareInterface(get_name());
+  if (!controller_orchestrator_->deactivateControllers(ctrls)) {
+    DXL_LOG_ERROR("Failed to deactivate controllers.");
+    return false;
+  }
   return true;
 }
 
@@ -664,6 +765,7 @@ void DynamixelHardwareInterface::setColorLED(const int& red, const int& green, c
 
 void DynamixelHardwareInterface::setColorLED(const std::string& color)
 {
+  DXL_LOG_INFO("Setting color LED '" << color << "'");
   if (color == COLOR_RED) {
     setColorLED(COLOR_RED_VALUES[0], COLOR_RED_VALUES[1], COLOR_RED_VALUES[2]);
   } else if (color == COLOR_GREEN) {
@@ -675,10 +777,12 @@ void DynamixelHardwareInterface::setColorLED(const std::string& color)
   }
 }
 
-void DynamixelHardwareInterface::updateColorLED()
+void DynamixelHardwareInterface::updateColorLED(std::string new_state)
 {
-  if (lifecycle_state_.label() == hardware_interface::lifecycle_state_names::UNCONFIGURED ||
-      lifecycle_state_.label() == hardware_interface::lifecycle_state_names::INACTIVE) {
+  if (new_state.empty())
+    new_state = lifecycle_state_.label();
+  if (new_state == hardware_interface::lifecycle_state_names::UNCONFIGURED ||
+      new_state == hardware_interface::lifecycle_state_names::INACTIVE) {
     setColorLED(COLOR_RED);
   } else {
     // hardware interface is active
@@ -697,12 +801,10 @@ void DynamixelHardwareInterface::adjustTransmissionOffsetsCallback(
   DXL_LOG_INFO("Request to adjust transmission offsets received.");
   response->success = true;
 
-  auto ctrls = controller_orchestrator_->getActiveControllerOfHardwareInterface(get_name());
-  if (!controller_orchestrator_->deactivateControllers(ctrls)) {
-    DXL_LOG_ERROR("Failed to deactivate controllers. Cannot adjust offsets.");
+  if (!unloadControllers()) {
+    DXL_LOG_INFO("Failed to unload controllers. Cannot adjust offsets.");
     response->success = false;
     response->message = "Failed to deactivate controllers. Cannot adjust offsets.";
-    return;
   }
 
   for (size_t i = 0; i < request->external_joint_measurements.name.size(); ++i) {
