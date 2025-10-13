@@ -166,6 +166,15 @@ DynamixelHardwareInterface::on_init(const hardware_interface::HardwareInfo& hard
         response->message = response->success ? "Torque set successfully" : "Failed to set torque";
       });
 
+  // reboot service - allows to reboot actuators if they are in an error state
+  reboot_service_ = node_->create_service<std_srvs::srv::Trigger>(
+      "~/reboot", [this](const std::shared_ptr<std_srvs::srv::Trigger::Request> request,
+                         const std::shared_ptr<std_srvs::srv::Trigger::Response> response) {
+        (void) request;
+        response->success = reboot();
+        response->message = response->success ? "Rebooted successfully" : "Failed to reboot";
+      });
+
   adjust_offset_service_ = node_->create_service<hector_transmission_interface_msgs::srv::AdjustTransmissionOffsets>(
       "~/adjust_transmission_offsets", std::bind(&DynamixelHardwareInterface::adjustTransmissionOffsetsCallback, this,
                                                  std::placeholders::_1, std::placeholders::_2));

@@ -2,7 +2,6 @@
 #define DYNAMIXEL_ROS_CONTROL_DYNAMIXEL_HARDWARE_INTERFACE_H
 
 #include <rclcpp/rclcpp.hpp>
-#include <std_srvs/srv/set_bool.hpp>
 #include <mutex>
 
 #include "joint.hpp"
@@ -14,6 +13,9 @@
 #include <hector_transmission_interface_msgs/srv/adjust_transmission_offsets.hpp>
 #include <controller_orchestrator/controller_orchestrator.hpp>
 #include <std_msgs/msg/bool.hpp>
+#include <std_srvs/srv/set_bool.hpp>
+#include <std_srvs/srv/trigger.hpp>
+
 namespace dynamixel_ros_control {
 
 class DynamixelHardwareInterface : public hardware_interface::SystemInterface
@@ -106,6 +108,7 @@ private:
   // ROS interface
   rclcpp::Node::SharedPtr node_;
   rclcpp::Service<std_srvs::srv::SetBool>::SharedPtr set_torque_service_;
+  rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr reboot_service_;
   rclcpp::Service<hector_transmission_interface_msgs::srv::AdjustTransmissionOffsets>::SharedPtr adjust_offset_service_;
   rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr soft_e_stop_subscription_;
   rclcpp::executors::MultiThreadedExecutor::SharedPtr exe_;
