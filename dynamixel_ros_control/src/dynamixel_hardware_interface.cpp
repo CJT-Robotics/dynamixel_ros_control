@@ -139,6 +139,11 @@ DynamixelHardwareInterface::on_init(const hardware_interface::HardwareInfo& hard
   set_torque_service_ = node_->create_service<std_srvs::srv::SetBool>(
       "~/set_torque", [this](const std::shared_ptr<std_srvs::srv::SetBool::Request> request,
                              const std::shared_ptr<std_srvs::srv::SetBool::Response> response) {
+        if (lifecycle_state_.label() != hardware_interface::lifecycle_state_names::ACTIVE) {
+          response->success = false;
+          response->message = "Hardware Interface must be in 'active' state to set torque";
+          return;
+        }
         DXL_LOG_INFO("Request to set torque to " << (request->data ? "ON" : "OFF") << " received.");
         response->success = setTorque(request->data);
         response->message = response->success ? "Torque set successfully" : "Failed to set torque";
@@ -152,8 +157,13 @@ DynamixelHardwareInterface::on_init(const hardware_interface::HardwareInfo& hard
 
   // set up e-stop subscription
   soft_e_stop_subscription_ = node_->create_subscription<std_msgs::msg::Bool>(
-      "~/soft_e_stop", rclcpp::SystemDefaultsQoS(),
-      [this](const std_msgs::msg::Bool::SharedPtr msg) { setEStop(msg->data); });
+      "~/soft_e_stop", rclcpp::SystemDefaultsQoS(), [this](const std_msgs::msg::Bool::SharedPtr msg) {
+        if (lifecycle_state_.label() != hardware_interface::lifecycle_state_names::ACTIVE) {
+          DXL_LOG_WARN("E-Stop message received but hardware interface is not in 'active' state.");
+          return;
+        }
+        setEStop(msg->data);
+      });
   // Transmissions
   if (!loadTransmissionConfiguration()) {
     return hardware_interface::CallbackReturn::ERROR;
@@ -242,7 +252,14 @@ hardware_interface::CallbackReturn DynamixelHardwareInterface::on_activate(const
     DXL_LOG_ERROR("Failed to set torque on activation to " << (torque_on_startup_ ? "ON" : "OFF"));
     return hardware_interface::CallbackReturn::ERROR;
   }
-  is_torqued_ = torque_on_startup_;  // TODO: check if successful
+  // make sure position control mode is active (safer than leaving it in whatever mode it was before)
+  // imagine, torque on startup but actuator from last shutdown in current mode & no controller running
+  for (auto& [name, joint] : joints_) {
+    if (!joint.readControlMode() || !joint.updateControlMode()) {
+      return CallbackReturn::ERROR;
+    }
+  }
+  is_torqued_ = torque_on_startup_;
   if (!resetGoalStateAndVerify()) {
     return CallbackReturn::ERROR;
   }
@@ -384,6 +401,9 @@ DynamixelHardwareInterface::perform_command_mode_switch(const std::vector<std::s
       return hardware_interface::return_type::ERROR;
     }
   }
+
+  first_read_successful_ = false;  // force second reset in read
+
   mode_switch_failed_ = false;  // mark as successful
   return hardware_interface::return_type::OK;
 }
@@ -743,7 +763,7 @@ bool DynamixelHardwareInterface::resetGoalStateAndVerify()
 {
   // Read current values (positions, velocities, etc.) before enabling torque
   if (!read_manager_.read() || !read_manager_.isOk() || !isHardwareOk()) {
-    DXL_LOG_ERROR("Failed to read current positions before enabling torque. Cannot enable torque.");
+    DXL_LOG_ERROR("[resetGoalStateAndVerify] Failed to read current values from actuators.");
     return false;
   }
 
@@ -754,13 +774,13 @@ bool DynamixelHardwareInterface::resetGoalStateAndVerify()
 
   // Write goal positions (will only write for the values belonging to the active command interfaces!)
   if (!control_write_manager_.write() || !control_write_manager_.isOk() || !isHardwareOk()) {
-    DXL_LOG_ERROR("Failed to write goal positions before enabling torque. Cannot enable torque.");
+    DXL_LOG_ERROR("[resetGoalStateAndVerify] Failed to write reset goal values.");
     return false;
   }
 
   // Re-read goal values for verification
   if (!cmd_read_manager_.read() || !cmd_read_manager_.isOk()) {
-    DXL_LOG_ERROR("Failed to re-read goal positions before enabling torque. Cannot verify goal positions.");
+    DXL_LOG_ERROR("[resetGoalStateAndVerify] Failed to re-read goal.");
     return false;
   }
 
@@ -768,15 +788,16 @@ bool DynamixelHardwareInterface::resetGoalStateAndVerify()
   for (auto& [name, joint] : joints_) {
     for (const auto& interface_name : joint.getAvailableCommandInterfaces()) {
       if (joint.read_goal_values_.count(interface_name) == 0) {
-        DXL_LOG_ERROR("Cannot verify cmd values from motor " << name << "!");
+        DXL_LOG_ERROR("[resetGoalStateAndVerify]  Cannot verify cmd values from motor " << name << "!");
         return false;
       }
       const auto& interface_value = joint.read_goal_values_.at(interface_name);
       if (std::abs(interface_value - joint.getActuatorState().goal[interface_name]) > 1e-2) {
-        DXL_LOG_ERROR("Joint '" << name << "' goal " << interface_name
-                                << " does not match read goal position before enabling torque. "
-                                << "(Current: " << joint.getActuatorState().goal[interface_name]
-                                << ", Read Goal Position: " << interface_value << ")");
+        DXL_LOG_ERROR("[resetGoalStateAndVerify] Joint '"
+                      << name << "' goal " << interface_name
+                      << " does not match read goal value before enabling torque. "
+                      << "(Current: " << joint.getActuatorState().goal[interface_name]
+                      << ", Read Goal Value: " << interface_value << ")");
         return false;
       }
     }
