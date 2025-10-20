@@ -165,8 +165,9 @@ DynamixelHardwareInterface::on_init(const hardware_interface::HardwareInfo& hard
   controller_orchestrator_ = std::make_shared<controller_orchestrator::ControllerOrchestrator>(node_);
 
   // set up e-stop subscription
+  std::string topic = ns != "/" ? ns + "/soft_e_stop" : "/soft_e_stop";
   soft_e_stop_subscription_ = node_->create_subscription<std_msgs::msg::Bool>(
-      "~/soft_e_stop", rclcpp::SystemDefaultsQoS(), [this](const std_msgs::msg::Bool::SharedPtr msg) {
+      topic, rclcpp::SystemDefaultsQoS(), [this](const std_msgs::msg::Bool::SharedPtr msg) {
         if (lifecycle_state_.label() != hardware_interface::lifecycle_state_names::ACTIVE) {
           DXL_LOG_WARN("E-Stop message received but hardware interface is not in 'active' state.");
           return;
