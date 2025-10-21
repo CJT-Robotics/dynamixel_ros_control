@@ -185,37 +185,72 @@ DynamixelHardwareInterface::on_init(const hardware_interface::HardwareInfo& hard
 hardware_interface::CallbackReturn
 DynamixelHardwareInterface::on_configure(const rclcpp_lifecycle::State& previous_state)
 {
+  using clock = std::chrono::steady_clock;
+  using ms = std::chrono::milliseconds;
+
   DXL_LOG_DEBUG("DynamixelHardwareInterface::on_configure from " << previous_state.label());
   first_read_successful_ = false;
-  if (!driver_.connect()) {
+
+  const auto t_start = clock::now();
+
+  // ---- Driver connect ----
+  const auto t_drv_begin = clock::now();
+  const bool driver_ok = driver_.connect();
+  const auto t_drv_end = clock::now();
+  const auto dt_driver = std::chrono::duration_cast<ms>(t_drv_end - t_drv_begin);
+  if (!driver_ok) {
+    DXL_LOG_ERROR("Failed to connect the driver in on_configure");
+    DXL_LOG_INFO("[timing] driver=" << dt_driver.count() << " ms, joints=0 ms, managers=0 ms, led=0 ms, total="
+                                    << std::chrono::duration_cast<ms>(t_drv_end - t_start).count() << " ms");
     return hardware_interface::CallbackReturn::FAILURE;
   }
 
-  bool connection_successful = true;
+  // ---- Joints connect ----
+  const auto t_jnt_begin = clock::now();
+  bool joints_ok = true;
   for (auto& [name, joint] : joints_) {
+    const auto tj0 = clock::now();
     if (!joint.connect()) {
-      connection_successful = false;
+      joints_ok = false;
+      DXL_LOG_ERROR("Failed to connect to joint '" << name << "'");
     }
     joint.reset();
+    (void) tj0;  // per-joint timing available if you want to log individually
   }
-  if (!connection_successful)
-    return hardware_interface::CallbackReturn::FAILURE;
-
-  // const bool torque = !joints_.empty() && joints_.begin()->second.torque;
-  // if (torque) {
-  //   setTorque(false, true);
-  // }
-
-  // Set up sync read / write managers
-  if (!setUpStatusReadManager() || !setUpStateReadManager() || !setUpTorqueWriteManager() ||
-      !setUpControlWriteManager() || !setUpCmdReadManager()) {
+  const auto t_jnt_end = clock::now();
+  const auto dt_joints = std::chrono::duration_cast<ms>(t_jnt_end - t_jnt_begin);
+  if (!joints_ok) {
+    DXL_LOG_INFO("[timing] driver=" << dt_driver.count() << " ms, joints=" << dt_joints.count()
+                                    << " ms, managers=0 ms, led=0 ms, total="
+                                    << std::chrono::duration_cast<ms>(t_jnt_end - t_start).count() << " ms");
     return hardware_interface::CallbackReturn::FAILURE;
   }
 
-  // if (torque) {
-  //   setTorque(true);
-  // }
+  // ---- Managers setup ----
+  const auto t_mgr_begin = clock::now();
+  const bool managers_ok = setUpStatusReadManager() && setUpStateReadManager() && setUpTorqueWriteManager() &&
+                           setUpControlWriteManager() && setUpCmdReadManager();
+  const auto t_mgr_end = clock::now();
+  const auto dt_mgr = std::chrono::duration_cast<ms>(t_mgr_end - t_mgr_begin);
+  if (!managers_ok) {
+    DXL_LOG_ERROR("Failed to setup communication managers");
+    DXL_LOG_INFO("[timing] driver=" << dt_driver.count() << " ms, joints=" << dt_joints.count()
+                                    << " ms, managers=" << dt_mgr.count() << " ms, led=0 ms, total="
+                                    << std::chrono::duration_cast<ms>(t_mgr_end - t_start).count() << " ms");
+    return hardware_interface::CallbackReturn::FAILURE;
+  }
+
+  // ---- LED set (inactive state) ----
+  const auto t_led_begin = clock::now();
   updateColorLED(hardware_interface::lifecycle_state_names::INACTIVE);
+  const auto t_led_end = clock::now();
+  const auto dt_led = std::chrono::duration_cast<ms>(t_led_end - t_led_begin);
+
+  // ---- Summary ----
+  const auto total_ms = std::chrono::duration_cast<ms>(t_led_end - t_start).count();
+  DXL_LOG_INFO("[timing] driver=" << dt_driver.count() << " ms, joints=" << dt_joints.count()
+                                  << " ms, managers=" << dt_mgr.count() << " ms, led=" << dt_led.count()
+                                  << " ms, total=" << total_ms << " ms");
 
   return CallbackReturn::SUCCESS;
 }
@@ -637,8 +672,8 @@ bool DynamixelHardwareInterface::setUpCmdReadManager()
   for (auto& [name, joint] : joints_) {
     cmd_read_manager_.addDynamixel(joint.dynamixel.get());
     for (auto& cmd_interface : joint.getAvailableCommandInterfaces()) {
-      DXL_LOG_WARN("SetupCmdReadManager: Registering command interface '" << cmd_interface << "' for joint '"
-                                                                          << joint.name << "'");
+      DXL_LOG_DEBUG("SetupCmdReadManager: Registering command interface '" << cmd_interface << "' for joint '"
+                                                                           << joint.name << "'");
       joint.read_goal_values_[cmd_interface] = std::numeric_limits<double>::quiet_NaN();  // Initialize read goal values
       std::string register_name = joint.commandInterfaceToRegisterName(cmd_interface);
       register_dynamixel_mappings[register_name].push_back(std::make_pair<Dynamixel*, DxlValue>(
