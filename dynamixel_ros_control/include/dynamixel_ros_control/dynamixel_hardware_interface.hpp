@@ -70,7 +70,7 @@ private:
 
   bool setTorque(bool do_enable, bool skip_controller_unloading = false, int retries = 5, bool direct_write = false);
   bool setEStop(bool do_enable);
-  bool resetGoalStateAndVerify();
+  bool resetGoalStateAndVerify(const std::vector<std::string>& joints);
   bool unloadControllers() const;
   void updateColorLED(std::string new_state = "");
   void setColorLED(const int& red, const int& green, const int& blue);
@@ -81,6 +81,7 @@ private:
   bool activateEStop();
 
   std::unordered_map<std::string, Joint> joints_;
+  std::vector<std::string> joint_names_;
   DynamixelDriver driver_;
 
   // Read

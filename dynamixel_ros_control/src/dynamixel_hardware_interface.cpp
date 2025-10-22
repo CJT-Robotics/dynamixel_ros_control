@@ -132,6 +132,7 @@ DynamixelHardwareInterface::on_init(const hardware_interface::HardwareInfo& hard
     ss << "-- initial values: " << mapToString(joint.dynamixel->getInitialRegisterValues()) << std::endl;
     DXL_LOG_DEBUG(ss.str());
     joints_.emplace(joint.name, std::move(joint));
+    joint_names_.emplace_back(joint_info.name);
   }
 
   // mimic joint setup
@@ -287,7 +288,7 @@ hardware_interface::CallbackReturn DynamixelHardwareInterface::on_activate(const
     }
   }
   is_torqued_ = torque_on_startup_;
-  if (!resetGoalStateAndVerify()) {
+  if (!resetGoalStateAndVerify(joint_names_)) {
     return CallbackReturn::ERROR;
   }
   updateColorLED(hardware_interface::lifecycle_state_names::ACTIVE);
@@ -429,8 +430,29 @@ DynamixelHardwareInterface::perform_command_mode_switch(const std::vector<std::s
     return hardware_interface::return_type::ERROR;
   }
 
+  // extract all joints that need to be reset // TODO: refactor
+  std::vector<std::string> joints_to_reset;
+  for (const auto& full_interface_name : start_interfaces) {
+    std::string joint_name;
+    std::string interface_name;
+    if (!splitFullInterfaceName(full_interface_name, joint_name, interface_name)) {
+      return hardware_interface::return_type::ERROR;
+    }
+    if (std::find(joints_to_reset.begin(), joints_to_reset.end(), joint_name) == joints_to_reset.end())
+      joints_to_reset.emplace_back(joint_name);
+  }
+  for (const auto& full_interface_name : stop_interfaces) {
+    std::string joint_name;
+    std::string interface_name;
+    if (!splitFullInterfaceName(full_interface_name, joint_name, interface_name)) {
+      return hardware_interface::return_type::ERROR;
+    }
+    if (std::find(joints_to_reset.begin(), joints_to_reset.end(), joint_name) == joints_to_reset.end())
+      joints_to_reset.emplace_back(joint_name);
+  }
+
   // Reset all goal states and verify that the cmds were written correctly
-  if (!resetGoalStateAndVerify()) {
+  if (!resetGoalStateAndVerify(joints_to_reset)) {
     return hardware_interface::return_type::ERROR;
   }
 
@@ -441,7 +463,7 @@ DynamixelHardwareInterface::perform_command_mode_switch(const std::vector<std::s
     }
   }
 
-  first_read_successful_ = false;  // force second reset in read
+  first_read_successful_ = false;  // force second reset in read // TODO: perform 2nd reset here
 
   mode_switch_failed_ = false;  // mark as successful
   return hardware_interface::return_type::OK;
@@ -759,7 +781,7 @@ bool DynamixelHardwareInterface::setTorque(const bool do_enable, bool skip_contr
 
   if (do_enable) {
     // reset goal state before enabling torque && verify that goal positions are set correctly
-    if (!resetGoalStateAndVerify())
+    if (!resetGoalStateAndVerify(joint_names_))
       return false;
   }
 
@@ -799,7 +821,7 @@ bool DynamixelHardwareInterface::setTorque(const bool do_enable, bool skip_contr
   return false;
 }
 
-bool DynamixelHardwareInterface::resetGoalStateAndVerify()
+bool DynamixelHardwareInterface::resetGoalStateAndVerify(const std::vector<std::string>& joints)
 {
   // Read current values (positions, velocities, etc.) before enabling torque
   if (!read_manager_.read() || !read_manager_.isOk() || !isHardwareOk()) {
@@ -808,8 +830,8 @@ bool DynamixelHardwareInterface::resetGoalStateAndVerify()
   }
 
   // reset goal state -> goal position = current position, goal velocity = 0, etc.
-  for (auto& [name, joint] : joints_) {
-    joint.resetGoalState();
+  for (auto& name : joints) {
+    joints_[name].resetGoalState();
   }
 
   // Write goal positions (will only write for the values belonging to the active command interfaces!)
@@ -825,8 +847,9 @@ bool DynamixelHardwareInterface::resetGoalStateAndVerify()
   }
 
   // Verify goal command values match the read values (for active command interfaces)
-  for (auto& [name, joint] : joints_) {
-    for (const auto& interface_name : joint.getAvailableCommandInterfaces()) {
+  for (auto& name : joints) {
+    auto& joint = joints_[name];
+    for (const auto& interface_name : joints_[name].getAvailableCommandInterfaces()) {
       if (joint.read_goal_values_.count(interface_name) == 0) {
         DXL_LOG_ERROR("[resetGoalStateAndVerify]  Cannot verify cmd values from motor " << name << "!");
         return false;
@@ -1007,7 +1030,7 @@ bool DynamixelHardwareInterface::activateEStop()
     }
   }
   // resetGoalStates
-  if (!resetGoalStateAndVerify()) {
+  if (!resetGoalStateAndVerify(joint_names_)) {
     DXL_LOG_WARN("Failed to reset goal state while attempting to activate the software e-stop.");
   }
 
