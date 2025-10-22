@@ -271,6 +271,27 @@ void Joint::resetGoalState()
   }
 }
 
+void Joint::setupMimicJoint(const std::string& joint_name, const double offset, const double multiplier)
+{
+  mimic_joints_states_[joint_name] = MimicState{};
+  mimic_joints_states_[joint_name].offset = offset;
+  mimic_joints_states_[joint_name].multiplier = multiplier;
+}
+
+void Joint::updateMimicJointStates()
+{
+  for (auto& [joint_name, mimic_state] : mimic_joints_states_) {
+    for (auto& [interface_name, value] : mimic_state.current) {
+      if (interface_name == hardware_interface::HW_IF_POSITION) {
+        value =
+            joint_state.current.at(hardware_interface::HW_IF_POSITION) * mimic_state.multiplier + mimic_state.offset;
+      } else {  // velocity, effort, current
+        value = joint_state.current.at(interface_name) * mimic_state.multiplier;
+      }
+    }
+  }
+}
+
 State& Joint::getActuatorState()
 {
   return state_transmission ? actuator_state : joint_state;
