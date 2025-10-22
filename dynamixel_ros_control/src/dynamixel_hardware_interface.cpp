@@ -834,10 +834,10 @@ bool DynamixelHardwareInterface::resetGoalStateAndVerify()
       const auto& interface_value = joint.read_goal_values_.at(interface_name);
       if (std::abs(interface_value - joint.getActuatorState().goal[interface_name]) > 1e-2) {
         DXL_LOG_ERROR("[resetGoalStateAndVerify] Joint '"
-                      << name << "' goal " << interface_name
-                      << " does not match read goal value before enabling torque. "
+                      << name << "' goal of interface " << interface_name << " does not match read goal value. "
                       << "(Current: " << joint.getActuatorState().goal[interface_name]
-                      << ", Read Goal Value: " << interface_value << ")");
+                      << ", Read Goal Value: " << interface_value
+                      << ", Target Goal Value: " << joint.getActuatorState().goal[interface_name] << ")");
         return false;
       }
     }
