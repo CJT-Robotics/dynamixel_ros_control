@@ -204,7 +204,11 @@ hardware_interface::CallbackReturn
 DynamixelHardwareInterface::on_configure(const rclcpp_lifecycle::State& previous_state)
 {
   DXL_LOG_DEBUG("DynamixelHardwareInterface::on_configure from " << previous_state.label());
+  // reset internal variables
   first_read_successful_ = false;
+  mode_switch_failed_ = false;
+  e_stop_active_ = false;
+
   if (!driver_.connect()) {
     return hardware_interface::CallbackReturn::FAILURE;
   }
@@ -219,20 +223,12 @@ DynamixelHardwareInterface::on_configure(const rclcpp_lifecycle::State& previous
   if (!connection_successful)
     return hardware_interface::CallbackReturn::FAILURE;
 
-  // const bool torque = !joints_.empty() && joints_.begin()->second.torque;
-  // if (torque) {
-  //   setTorque(false, true);
-  // }
-
   // Set up sync read / write managers
   if (!setUpStateAndStatusReadManager() || !setUpTorqueWriteManager() || !setUpControlWriteManager() ||
       !setUpCmdReadManager() || !setUpLEDWriteManager()) {
     return hardware_interface::CallbackReturn::FAILURE;
   }
 
-  // if (torque) {
-  //   setTorque(true);
-  // }
   updateColorLED(hardware_interface::lifecycle_state_names::INACTIVE);
 
   return CallbackReturn::SUCCESS;
@@ -453,12 +449,14 @@ DynamixelHardwareInterface::perform_command_mode_switch(const std::vector<std::s
 
   // Reset all goal states and verify that the cmds were written correctly
   if (!resetGoalStateAndVerify(joints_to_reset)) {
+    DXL_LOG_ERROR("Failed to reset goal states during command mode switch.");
     return hardware_interface::return_type::ERROR;
   }
 
   // Write control mode
   for (auto& [name, joint] : joints_) {
     if (!joint.updateControlMode()) {
+      DXL_LOG_ERROR("Failed to update control mode for joint '" << joint.name << "' during command mode switch.");
       return hardware_interface::return_type::ERROR;
     }
   }
@@ -751,6 +749,7 @@ bool DynamixelHardwareInterface::reboot() const
 {
   for (auto& [name, joint] : joints_) {
     if (joint.dynamixel->hardware_error_status != OK && !joint.dynamixel->reboot()) {
+      DXL_LOG_ERROR("Dynamixel '" << name << "' reboot failed.");
       return false;
     }
   }
@@ -827,6 +826,12 @@ bool DynamixelHardwareInterface::resetGoalStateAndVerify(const std::vector<std::
   if (!read_manager_.read() || !read_manager_.isOk() || !isHardwareOk()) {
     DXL_LOG_ERROR("[resetGoalStateAndVerify] Failed to read current values from actuators.");
     return false;
+  }
+
+  for (auto& [name, joint] : joints_) {
+    if (joint.state_transmission) {
+      joint.state_transmission->actuator_to_joint();
+    }
   }
 
   // reset goal state -> goal position = current position, goal velocity = 0, etc.
