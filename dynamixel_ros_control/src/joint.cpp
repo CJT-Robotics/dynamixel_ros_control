@@ -256,9 +256,9 @@ void Joint::resetGoalState(const std::string& interface_name)
       value = default_goal_values_.at(interface_name);
     }
   }
-  DXL_LOG_INFO("Resetting goal value of interface '" << interface_name << "' for joint '" << name << "' to " << value);
-  DXL_LOG_INFO("Active command interfaces for joint '" << name << "': " << iterableToString(active_command_interfaces_)
-                                                       << ", control mode: " << control_mode_);
+  DXL_LOG_DEBUG("Resetting goal value of interface '" << interface_name << "' for joint '" << name << "' to " << value);
+  DXL_LOG_DEBUG("Active command interfaces for joint '" << name << "': " << iterableToString(active_command_interfaces_)
+                                                        << ", control mode: " << control_mode_);
   if (command_transmission) {
     command_transmission->actuator_to_joint();  // Unfortunately, there is no interface for single interface handles
   }

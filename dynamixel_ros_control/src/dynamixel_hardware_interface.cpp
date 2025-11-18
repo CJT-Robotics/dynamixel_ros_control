@@ -419,10 +419,10 @@ DynamixelHardwareInterface::perform_command_mode_switch(const std::vector<std::s
   }
 
   // Start & stop interfaces
-  if (!processCommandInterfaceUpdates(start_interfaces, false)) {
+  if (!processCommandInterfaceUpdates(stop_interfaces, true)) {
     return hardware_interface::return_type::ERROR;
   }
-  if (!processCommandInterfaceUpdates(stop_interfaces, true)) {
+  if (!processCommandInterfaceUpdates(start_interfaces, false)) {
     return hardware_interface::return_type::ERROR;
   }
 
