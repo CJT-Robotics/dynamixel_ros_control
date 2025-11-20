@@ -784,8 +784,10 @@ bool DynamixelHardwareInterface::setTorque(const bool do_enable, bool skip_contr
       return false;
   }
 
-  // unload all controllers of the hardware interface
-  if (!skip_controller_unloading && !unloadControllers()) {
+  // unload all controllers of the hardware interface (if hw is not in unconfigured state)
+  if ((!skip_controller_unloading ||
+       lifecycle_state_.label() == hardware_interface::lifecycle_state_names::UNCONFIGURED) &&
+      !unloadControllers()) {
     DXL_LOG_ERROR("Failed to deactivate controllers before changing torque. Still adapting torque...");
   }
   DXL_LOG_INFO((do_enable ? "Enabling" : "Disabling") << " motor torque.");
@@ -937,6 +939,12 @@ void DynamixelHardwareInterface::adjustTransmissionOffsetsCallback(
   DXL_LOG_INFO("Request to adjust transmission offsets received.");
   response->success = true;
 
+  if (lifecycle_state_.label() == hardware_interface::lifecycle_state_names::UNCONFIGURED) {
+    response->success = false;
+    response->message = "Hardware interface is in UNCONFIGURED state. Cannot adjust offsets.";
+    return;
+  }
+
   if (!unloadControllers()) {
     DXL_LOG_INFO("Failed to unload controllers. Cannot adjust offsets.");
     response->success = false;
@@ -997,9 +1005,12 @@ bool DynamixelHardwareInterface::setEStop(bool do_enable)
       }
       // Activating e-stop
       DXL_LOG_WARN("E-STOP ACTIVATED via topic");
-      if (!unloadControllers()) {
-        DXL_LOG_ERROR("Failed to unload controllers. Cannot activate e-stop.");
-        return false;
+      // unload controllers (not possible if hardware interface is not configured)
+      if (lifecycle_state_.label() != hardware_interface::lifecycle_state_names::UNCONFIGURED) {
+        if (!unloadControllers()) {
+          DXL_LOG_ERROR("Failed to unload controllers. Cannot activate e-stop.");
+          return false;
+        }
       }
       std::lock_guard<std::mutex> lock(dynamixel_comm_mutex_);
       activateEStop();
