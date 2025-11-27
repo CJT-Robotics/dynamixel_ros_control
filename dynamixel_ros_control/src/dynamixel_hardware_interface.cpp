@@ -62,10 +62,10 @@ bool loadInterfaceRegisterNameTranslation(std::unordered_map<std::string, std::s
 namespace dynamixel_ros_control {
 
 hardware_interface::CallbackReturn
-DynamixelHardwareInterface::on_init(const hardware_interface::HardwareInfo& hardware_info)
+DynamixelHardwareInterface::on_init(const hardware_interface::HardwareComponentInterfaceParams& params)
 {
   // Load hardware configuration
-  const auto result = SystemInterface::on_init(hardware_info);
+  const auto result = SystemInterface::on_init(params);
   if (result != CallbackReturn::SUCCESS) {
     return result;
   }
@@ -89,6 +89,7 @@ DynamixelHardwareInterface::on_init(const hardware_interface::HardwareInfo& hard
   getParameter(info_.hardware_parameters, "torque_on_startup", torque_on_startup_, false);
   getParameter(info_.hardware_parameters, "torque_off_on_shutdown", torque_off_on_shutdown_, false);
   getParameter(info_.hardware_parameters, "reboot_on_hardware_error", reboot_on_hardware_error_, false);
+  getParameter(info_.hardware_parameters, "publish_target_joint_states", publish_target_joint_states_, false);
 
   // Initialize driver
   if (!driver_.init(port_name, baud_rate)) {
@@ -148,7 +149,8 @@ DynamixelHardwareInterface::on_init(const hardware_interface::HardwareInfo& hard
   // (making sure it gets a separate name but the same namespace as the controller manager)
   auto tmp_node = rclcpp::Node::make_shared("dynamixel_ros_control_node");
   auto ns = std::string(tmp_node->get_namespace());
-  node_ = std::make_shared<rclcpp::Node>(hardware_info.name, ns, rclcpp::NodeOptions().use_global_arguments(false));
+  node_ =
+      std::make_shared<rclcpp::Node>(params.hardware_info.name, ns, rclcpp::NodeOptions().use_global_arguments(false));
   exe_ = std::make_shared<rclcpp::executors::MultiThreadedExecutor>();
   exe_->add_node(node_);
   exe_thread_ = std::thread([this] { exe_->spin(); });
@@ -195,6 +197,11 @@ DynamixelHardwareInterface::on_init(const hardware_interface::HardwareInfo& hard
   // Transmissions
   if (!loadTransmissionConfiguration()) {
     return hardware_interface::CallbackReturn::ERROR;
+  }
+
+  if (publish_target_joint_states_) {
+    target_joint_state_publisher_ =
+        node_->create_publisher<sensor_msgs::msg::JointState>("~/target_joint_states", rclcpp::SystemDefaultsQoS());
   }
 
   return hardware_interface::CallbackReturn::SUCCESS;
@@ -557,6 +564,18 @@ hardware_interface::return_type DynamixelHardwareInterface::write(const rclcpp::
     return hardware_interface::return_type::OK;
 
   control_write_manager_.write();
+  if (publish_target_joint_states_) {
+    auto target_msg = sensor_msgs::msg::JointState();
+    target_msg.header.stamp = get_clock()->now();
+    for (const auto& joint_name : joint_names_) {
+      const auto& joint = joints_.at(joint_name);
+      target_msg.name.push_back(joint_name);
+      target_msg.position.push_back(joint.joint_state.goal.at(hardware_interface::HW_IF_POSITION));
+      target_msg.velocity.push_back(joint.joint_state.goal.at(hardware_interface::HW_IF_VELOCITY));
+      target_msg.effort.push_back(joint.joint_state.goal.at(hardware_interface::HW_IF_EFFORT));
+    }
+    target_joint_state_publisher_->publish(target_msg);
+  }
 
   if (!control_write_manager_.isOk()) {
     DXL_LOG_ERROR("Write manager lost connection");

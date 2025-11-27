@@ -27,7 +27,7 @@ public:
    * @param hardware_info
    * @return
    */
-  CallbackReturn on_init(const hardware_interface::HardwareInfo& hardware_info) override;
+  CallbackReturn on_init(const hardware_interface::HardwareComponentInterfaceParams& params) override;
   /**
    * Connect to hardware
    * @param previous_state
@@ -100,6 +100,7 @@ private:
   bool torque_on_startup_{false};
   bool torque_off_on_shutdown_{false};
   bool reboot_on_hardware_error_{false};
+  bool publish_target_joint_states_{false};
 
   // variables
   bool is_torqued_{false};
@@ -112,6 +113,7 @@ private:
   rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr reboot_service_;
   rclcpp::Service<hector_transmission_interface_msgs::srv::AdjustTransmissionOffsets>::SharedPtr adjust_offset_service_;
   rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr soft_e_stop_subscription_;
+  rclcpp::Publisher<sensor_msgs::msg::JointState>::SharedPtr target_joint_state_publisher_;
   rclcpp::executors::MultiThreadedExecutor::SharedPtr exe_;
   std::thread exe_thread_;
   std::mutex dynamixel_comm_mutex_;
