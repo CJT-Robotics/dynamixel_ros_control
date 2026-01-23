@@ -176,9 +176,13 @@ DynamixelHardwareInterface::on_init(const hardware_interface::HardwareInfo& hard
         response->message = response->success ? "Rebooted successfully" : "Failed to reboot";
       });
 
-  adjust_offset_service_ = node_->create_service<hector_transmission_interface_msgs::srv::AdjustTransmissionOffsets>(
-      "~/adjust_transmission_offsets", std::bind(&DynamixelHardwareInterface::adjustTransmissionOffsetsCallback, this,
-                                                 std::placeholders::_1, std::placeholders::_2));
+  offset_manager_ =
+      std::make_shared<hector_transmission_interface::AdjustableOffsetManager>(node_, std::ref(dynamixel_comm_mutex_));
+  for (const auto& [name, joint] : joints_) {
+    // try to register only adjustable offset transmissions
+    offset_manager_->add_joint(name, joint.state_transmission, joint.command_transmission,
+                               [&joint]() { return joint.joint_state.current.at(hardware_interface::HW_IF_POSITION); });
+  }
   // setup controller orchestrator
   controller_orchestrator_ = std::make_shared<controller_orchestrator::ControllerOrchestrator>(node_);
 
@@ -930,69 +934,6 @@ void DynamixelHardwareInterface::updateColorLED(std::string new_state)
       setColorLED(COLOR_BLUE);
     }
   }
-}
-
-void DynamixelHardwareInterface::adjustTransmissionOffsetsCallback(
-    const std::shared_ptr<hector_transmission_interface_msgs::srv::AdjustTransmissionOffsets::Request> request,
-    const std::shared_ptr<hector_transmission_interface_msgs::srv::AdjustTransmissionOffsets::Response> response)
-{
-  DXL_LOG_INFO("Request to adjust transmission offsets received.");
-  response->success = true;
-
-  if (lifecycle_state_.label() == hardware_interface::lifecycle_state_names::UNCONFIGURED) {
-    response->success = false;
-    response->message = "Hardware interface is in UNCONFIGURED state. Cannot adjust offsets.";
-    return;
-  }
-
-  if (!unloadControllers()) {
-    DXL_LOG_INFO("Failed to unload controllers. Cannot adjust offsets.");
-    response->success = false;
-    response->message = "Failed to deactivate controllers. Cannot adjust offsets.";
-  }
-
-  for (size_t i = 0; i < request->external_joint_measurements.name.size(); ++i) {
-    const auto& joint_name = request->external_joint_measurements.name[i];
-    const auto& external_joint_position = request->external_joint_measurements.position[i];
-    const auto& internal_joint_position = joints_[joint_name].joint_state.current["position"];
-    double corrected_offset = std::numeric_limits<double>::quiet_NaN();
-    std::string transmission_type;
-    for (const auto& info : info_.transmissions) {
-      if (info.joints.front().name == joint_name) {
-        transmission_type = info.type;
-        break;
-      }
-    }
-    if (transmission_type == "hector_transmission_interface/AdjustableOffsetTransmission") {
-      auto adjustable_state = std::dynamic_pointer_cast<hector_transmission_interface::AdjustableOffsetTransmission>(
-          joints_[joint_name].state_transmission);
-      auto adjustable_command = std::dynamic_pointer_cast<hector_transmission_interface::AdjustableOffsetTransmission>(
-          joints_[joint_name].command_transmission);
-
-      if (!adjustable_state || !adjustable_command) {
-        DXL_LOG_ERROR("Failed to cast transmission for joint '" << joint_name << "'.");
-        response->success = false;
-        response->message = "Transmission cast failed for joint: " + joint_name;
-        return;
-      }
-      double current_offset = adjustable_state->get_joint_offset();
-      corrected_offset = external_joint_position - internal_joint_position + current_offset;
-
-      adjustable_state->adjustTransmissionOffset(corrected_offset);
-      adjustable_command->adjustTransmissionOffset(corrected_offset);
-      DXL_LOG_INFO("Adjusted offset for joint '" << joint_name << "' to " << corrected_offset);
-    } else {
-      DXL_LOG_ERROR("Transmission type '" << transmission_type << "' is not supported for offset adjustment.");
-      response->success = false;
-      response->message = "Unsupported transmission type: " + transmission_type;
-      return;
-    }
-
-    response->adjusted_offsets.push_back(corrected_offset);
-  }
-
-  response->success = true;
-  response->message = "Offsets adjusted successfully";
 }
 
 bool DynamixelHardwareInterface::setEStop(bool do_enable)

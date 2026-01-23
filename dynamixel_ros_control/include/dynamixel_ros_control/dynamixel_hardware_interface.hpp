@@ -11,7 +11,9 @@
 #include <hardware_interface/system_interface.hpp>
 #include <transmission_interface/transmission.hpp>
 #include <hector_transmission_interface_msgs/srv/adjust_transmission_offsets.hpp>
+#include <hector_transmission_interface/adjustable_offset_manager.hpp>
 #include <controller_orchestrator/controller_orchestrator.hpp>
+#include <hector_transmission_interface/adjustable_offset_transmission_loader.hpp>
 #include <std_msgs/msg/bool.hpp>
 #include <std_srvs/srv/set_bool.hpp>
 #include <std_srvs/srv/trigger.hpp>
@@ -75,9 +77,6 @@ private:
   void updateColorLED(std::string new_state = "");
   void setColorLED(const int& red, const int& green, const int& blue);
   void setColorLED(const std::string& color);
-  void adjustTransmissionOffsetsCallback(
-      const std::shared_ptr<hector_transmission_interface_msgs::srv::AdjustTransmissionOffsets::Request> request,
-      const std::shared_ptr<hector_transmission_interface_msgs::srv::AdjustTransmissionOffsets::Response> response);
   bool activateEStop();
 
   std::unordered_map<std::string, Joint> joints_;
@@ -110,12 +109,12 @@ private:
   rclcpp::Node::SharedPtr node_;
   rclcpp::Service<std_srvs::srv::SetBool>::SharedPtr set_torque_service_;
   rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr reboot_service_;
-  rclcpp::Service<hector_transmission_interface_msgs::srv::AdjustTransmissionOffsets>::SharedPtr adjust_offset_service_;
   rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr soft_e_stop_subscription_;
   rclcpp::executors::MultiThreadedExecutor::SharedPtr exe_;
   std::thread exe_thread_;
   std::mutex dynamixel_comm_mutex_;
   std::shared_ptr<controller_orchestrator::ControllerOrchestrator> controller_orchestrator_;
+  std::shared_ptr<hector_transmission_interface::AdjustableOffsetManager> offset_manager_;
 };
 
 }  // namespace dynamixel_ros_control
