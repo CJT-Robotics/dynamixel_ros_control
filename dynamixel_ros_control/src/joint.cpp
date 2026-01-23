@@ -350,6 +350,9 @@ bool Joint::initDefaultGoalValues()
       }
     }
     default_goal_values_[interface_name] = default_value;
+    DXL_LOG_INFO("Setting default goal value for interface '" << interface_name << "' for joint '" << name << "' to "
+                                                              << default_value << " read from register '"
+                                                              << register_name << "'.");
   }
   return true;
 }

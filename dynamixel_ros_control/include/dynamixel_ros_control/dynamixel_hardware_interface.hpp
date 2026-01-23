@@ -2,7 +2,6 @@
 #define DYNAMIXEL_ROS_CONTROL_DYNAMIXEL_HARDWARE_INTERFACE_H
 
 #include <rclcpp/rclcpp.hpp>
-#include <std_srvs/srv/set_bool.hpp>
 #include <mutex>
 
 #include "joint.hpp"
@@ -14,6 +13,9 @@
 #include <hector_transmission_interface_msgs/srv/adjust_transmission_offsets.hpp>
 #include <controller_orchestrator/controller_orchestrator.hpp>
 #include <std_msgs/msg/bool.hpp>
+#include <std_srvs/srv/set_bool.hpp>
+#include <std_srvs/srv/trigger.hpp>
+
 namespace dynamixel_ros_control {
 
 class DynamixelHardwareInterface : public hardware_interface::SystemInterface
@@ -68,7 +70,7 @@ private:
 
   bool setTorque(bool do_enable, bool skip_controller_unloading = false, int retries = 5, bool direct_write = false);
   bool setEStop(bool do_enable);
-  bool resetGoalStateAndVerify();
+  bool resetGoalStateAndVerify(const std::vector<std::string>& joints);
   bool unloadControllers() const;
   void updateColorLED(std::string new_state = "");
   void setColorLED(const int& red, const int& green, const int& blue);
@@ -79,6 +81,7 @@ private:
   bool activateEStop();
 
   std::unordered_map<std::string, Joint> joints_;
+  std::vector<std::string> joint_names_;
   DynamixelDriver driver_;
 
   // Read
@@ -106,6 +109,7 @@ private:
   // ROS interface
   rclcpp::Node::SharedPtr node_;
   rclcpp::Service<std_srvs::srv::SetBool>::SharedPtr set_torque_service_;
+  rclcpp::Service<std_srvs::srv::Trigger>::SharedPtr reboot_service_;
   rclcpp::Service<hector_transmission_interface_msgs::srv::AdjustTransmissionOffsets>::SharedPtr adjust_offset_service_;
   rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr soft_e_stop_subscription_;
   rclcpp::executors::MultiThreadedExecutor::SharedPtr exe_;
