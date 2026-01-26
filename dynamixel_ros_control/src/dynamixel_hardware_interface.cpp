@@ -176,13 +176,16 @@ DynamixelHardwareInterface::on_init(const hardware_interface::HardwareInfo& hard
         response->message = response->success ? "Rebooted successfully" : "Failed to reboot";
       });
 
-  offset_manager_ =
-      std::make_shared<hector_transmission_interface::AdjustableOffsetManager>(node_, std::ref(dynamixel_comm_mutex_));
+  // Setup Adjustable Transmission Offset Manager
+  auto pre_callback = [this]() { return unloadControllers(); };
+  offset_manager_ = std::make_shared<hector_transmission_interface::AdjustableOffsetManager>(
+      node_, std::ref(dynamixel_comm_mutex_), std::make_optional(pre_callback));
   for (const auto& [name, joint] : joints_) {
     // try to register only adjustable offset transmissions
     offset_manager_->add_joint(name, joint.state_transmission, joint.command_transmission,
                                [&joint]() { return joint.joint_state.current.at(hardware_interface::HW_IF_POSITION); });
   }
+
   // setup controller orchestrator
   controller_orchestrator_ = std::make_shared<controller_orchestrator::ControllerOrchestrator>(node_);
 
