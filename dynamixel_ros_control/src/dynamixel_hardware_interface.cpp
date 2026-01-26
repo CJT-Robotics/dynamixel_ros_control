@@ -177,14 +177,13 @@ DynamixelHardwareInterface::on_init(const hardware_interface::HardwareInfo& hard
       });
 
   // Setup Adjustable Transmission Offset Manager
-  auto pre_callback = [this]() { return unloadControllers(); };
+  auto pre_callback = [this]() { return deactivateControllers(); };
+  auto post_callback = [this]() {
+    first_read_successful_ = false;  // force read after offset adjustment
+    return true;
+  };
   offset_manager_ = std::make_shared<hector_transmission_interface::AdjustableOffsetManager>(
-      node_, std::ref(dynamixel_comm_mutex_), std::make_optional(pre_callback));
-  for (const auto& [name, joint] : joints_) {
-    // try to register only adjustable offset transmissions
-    offset_manager_->add_joint(name, joint.state_transmission, joint.command_transmission,
-                               [&joint]() { return joint.joint_state.current.at(hardware_interface::HW_IF_POSITION); });
-  }
+      node_, std::ref(dynamixel_comm_mutex_), std::make_optional(pre_callback), std::make_optional(post_callback));
 
   // setup controller orchestrator
   controller_orchestrator_ = std::make_shared<controller_orchestrator::ControllerOrchestrator>(node_);
@@ -365,6 +364,14 @@ std::vector<hardware_interface::StateInterface::ConstSharedPtr> DynamixelHardwar
     }
     joint.state_transmission->configure(joint_handles, actuator_handles);
   }
+
+  // register offset manager state interfaces
+  for (const auto& [name, joint] : joints_) {
+    // try to register only adjustable offset transmissions
+    offset_manager_->add_joint_state_interface(name, joint.state_transmission, [&joint]() {
+      return joint.joint_state.current.at(hardware_interface::HW_IF_POSITION);
+    });
+  }
   return state_interfaces;
 }
 
@@ -403,7 +410,11 @@ std::vector<hardware_interface::CommandInterface::SharedPtr> DynamixelHardwareIn
     }
     joint.command_transmission->configure(joint_handles, actuator_handles);
   }
-
+  // register offset manager command interfaces
+  for (const auto& [name, joint] : joints_) {
+    // try to register only adjustable offset transmissions
+    offset_manager_->add_joint_command_interface(name, joint.command_transmission);
+  }
   return command_interfaces;
 }
 
@@ -794,7 +805,7 @@ bool DynamixelHardwareInterface::setTorque(const bool do_enable, bool skip_contr
   // unload all controllers of the hardware interface (if hw is not in unconfigured state)
   if ((!skip_controller_unloading ||
        lifecycle_state_.label() == hardware_interface::lifecycle_state_names::UNCONFIGURED) &&
-      !unloadControllers()) {
+      !deactivateControllers()) {
     DXL_LOG_ERROR("Failed to deactivate controllers before changing torque. Still adapting torque...");
   }
   DXL_LOG_INFO((do_enable ? "Enabling" : "Disabling") << " motor torque.");
@@ -881,7 +892,7 @@ bool DynamixelHardwareInterface::resetGoalStateAndVerify(const std::vector<std::
   return true;
 }
 
-bool DynamixelHardwareInterface::unloadControllers() const
+bool DynamixelHardwareInterface::deactivateControllers() const
 {
   auto ctrls = controller_orchestrator_->getActiveControllerOfHardwareInterface(get_name());
   if (!controller_orchestrator_->deactivateControllers(ctrls)) {
@@ -951,7 +962,7 @@ bool DynamixelHardwareInterface::setEStop(bool do_enable)
       DXL_LOG_WARN("E-STOP ACTIVATED via topic");
       // unload controllers (not possible if hardware interface is not configured)
       if (lifecycle_state_.label() != hardware_interface::lifecycle_state_names::UNCONFIGURED) {
-        if (!unloadControllers()) {
+        if (!deactivateControllers()) {
           DXL_LOG_ERROR("Failed to unload controllers. Cannot activate e-stop.");
           return false;
         }
