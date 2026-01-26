@@ -139,9 +139,18 @@ std::vector<std::pair<uint8_t, uint16_t>> DynamixelDriver::scan() const
 
 bool DynamixelDriver::reboot(const uint8_t id) const
 {
-  uint8_t error;
+  uint8_t error = 0;
   DXL_LOG_DEBUG("[REBOOT] id " << static_cast<unsigned int>(id));
-  return packet_handler_->reboot(port_handler_, id, &error);
+  int comm_result = packet_handler_->reboot(port_handler_, id, &error);
+  if (comm_result != COMM_SUCCESS) {
+    DXL_LOG_ERROR("[ID " << static_cast<int>(id)
+                         << "] Communication error while rebooting: " << communicationErrorToString(comm_result));
+  }
+  if (error != 0) {
+    DXL_LOG_ERROR("[ID " << static_cast<int>(id) << "] Failed to reboot: " << packetErrorToString(error)
+                         << " error code: " << error);
+  }
+  return comm_result == COMM_SUCCESS;
 }
 
 bool DynamixelDriver::writeRegister(const uint8_t id, const uint16_t address, const uint8_t data_length,

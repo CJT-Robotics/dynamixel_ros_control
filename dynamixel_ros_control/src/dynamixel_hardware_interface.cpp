@@ -172,6 +172,7 @@ DynamixelHardwareInterface::on_init(const hardware_interface::HardwareInfo& hard
       "~/reboot", [this](const std::shared_ptr<std_srvs::srv::Trigger::Request> request,
                          const std::shared_ptr<std_srvs::srv::Trigger::Response> response) {
         (void) request;
+        RCLCPP_INFO(node_->get_logger(), "Reboot request received.");
         response->success = reboot();
         response->message = response->success ? "Rebooted successfully" : "Failed to reboot";
       });
@@ -763,8 +764,10 @@ bool DynamixelHardwareInterface::isHardwareOk() const
   return ok;
 }
 
-bool DynamixelHardwareInterface::reboot() const
+bool DynamixelHardwareInterface::reboot()
 {
+  // lock communication mutex (avoid simultaneous access with read / write)
+  std::lock_guard<std::mutex> lock(dynamixel_comm_mutex_);
   for (auto& [name, joint] : joints_) {
     if (joint.dynamixel->hardware_error_status != OK && !joint.dynamixel->reboot()) {
       DXL_LOG_ERROR("Dynamixel '" << name << "' reboot failed.");
@@ -777,32 +780,29 @@ bool DynamixelHardwareInterface::reboot() const
 bool DynamixelHardwareInterface::setTorque(const bool do_enable, bool skip_controller_unloading, int retries,
                                            const bool direct_write)
 {
-  std::lock_guard<std::mutex> lock(dynamixel_comm_mutex_);
-
-  // Check if already in desired state
-  bool all_torqued = true;
-  bool all_torqued_off = true;
-  for (const auto& [name, joint] : joints_) {
-    bool joint_torqued;
-    if (!joint.dynamixel->readRegister(DXL_REGISTER_CMD_TORQUE, joint_torqued)) {
-      return false;
+  // check if torque change is necessary
+  {
+    std::lock_guard<std::mutex> lock(dynamixel_comm_mutex_);
+    // Check if already in desired state
+    bool all_torqued = true;
+    bool all_torqued_off = true;
+    for (const auto& [name, joint] : joints_) {
+      bool joint_torqued;
+      if (!joint.dynamixel->readRegister(DXL_REGISTER_CMD_TORQUE, joint_torqued)) {
+        return false;
+      }
+      all_torqued &= joint_torqued;
+      all_torqued_off &= !joint_torqued;
     }
-    all_torqued &= joint_torqued;
-    all_torqued_off &= !joint_torqued;
+    // skip if all joints are already in the desired state
+    if (all_torqued != all_torqued_off && all_torqued == do_enable) {
+      DXL_LOG_INFO("All joints already have torque " << (do_enable ? "ENABLED" : "DISABLED") << ". Skipping ...");
+      return true;
+    }
   }
-  // skip if all joints are already in the desired state
-  if (all_torqued != all_torqued_off && all_torqued == do_enable) {
-    DXL_LOG_INFO("All joints already have torque " << (do_enable ? "ENABLED" : "DISABLED") << ". Skipping ...");
-    return true;
-  }
-
-  if (do_enable) {
-    // reset goal state before enabling torque && verify that goal positions are set correctly
-    if (!resetGoalStateAndVerify(joint_names_))
-      return false;
-  }
-
   // unload all controllers of the hardware interface (if hw is not in unconfigured state)
+  RCLCPP_INFO(get_logger(), "Controller unloading before changing torque is %s",
+              skip_controller_unloading ? "skipped" : "not skipped");
   if ((!skip_controller_unloading ||
        lifecycle_state_.label() == hardware_interface::lifecycle_state_names::UNCONFIGURED) &&
       !deactivateControllers()) {
@@ -810,32 +810,40 @@ bool DynamixelHardwareInterface::setTorque(const bool do_enable, bool skip_contr
   }
   DXL_LOG_INFO((do_enable ? "Enabling" : "Disabling") << " motor torque.");
 
-  bool success = false;
-  retries = std::max(retries, 1);  // ensure at least one attempt
-  int counter = 0;
-  while (counter < retries && !success) {
-    success = true;
-    for (auto& [name, joint] : joints_) {
-      joint.torque = do_enable;  // set torque of each joint -> also relevant for indirect write
-      if (direct_write && !joint.dynamixel->writeRegister(DXL_REGISTER_CMD_TORQUE, joint.torque)) {
+  {
+    std::lock_guard<std::mutex> lock(dynamixel_comm_mutex_);
+    if (do_enable) {
+      // reset goal state before enabling torque && verify that goal positions are set correctly
+      if (!resetGoalStateAndVerify(joint_names_))
+        return false;
+    }
+    bool success = false;
+    retries = std::max(retries, 1);  // ensure at least one attempt
+    int counter = 0;
+    while (counter < retries && !success) {
+      success = true;
+      for (auto& [name, joint] : joints_) {
+        joint.torque = do_enable;  // set torque of each joint -> also relevant for indirect write
+        if (direct_write && !joint.dynamixel->writeRegister(DXL_REGISTER_CMD_TORQUE, joint.torque)) {
+          success = false;
+          break;  // Break if direct write fails
+        }
+      }
+
+      if (!direct_write && !torque_write_manager_.write()) {
         success = false;
-        break;  // Break if direct write fails
+      }
+
+      counter++;
+      if (!success) {
+        DXL_LOG_WARN("Failed to set torque for all joints. Retrying... (" << counter << " of " << retries << ")");
       }
     }
-
-    if (!direct_write && !torque_write_manager_.write()) {
-      success = false;
+    if (success) {
+      is_torqued_ = do_enable;
+      updateColorLED();
+      return true;
     }
-
-    counter++;
-    if (!success) {
-      DXL_LOG_WARN("Failed to set torque for all joints. Retrying... (" << counter << " of " << retries << ")");
-    }
-  }
-  if (success) {
-    is_torqued_ = do_enable;
-    updateColorLED();
-    return true;
   }
   return false;
 }

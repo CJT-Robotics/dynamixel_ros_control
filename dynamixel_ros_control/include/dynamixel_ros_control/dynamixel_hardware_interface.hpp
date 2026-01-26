@@ -68,7 +68,7 @@ private:
   bool setUpLEDWriteManager();
 
   bool isHardwareOk() const;
-  bool reboot() const;
+  bool reboot();
 
   bool setTorque(bool do_enable, bool skip_controller_unloading = false, int retries = 5, bool direct_write = false);
   bool setEStop(bool do_enable);
