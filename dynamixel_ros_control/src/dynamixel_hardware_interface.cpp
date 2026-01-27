@@ -172,13 +172,20 @@ DynamixelHardwareInterface::on_init(const hardware_interface::HardwareInfo& hard
       "~/reboot", [this](const std::shared_ptr<std_srvs::srv::Trigger::Request> request,
                          const std::shared_ptr<std_srvs::srv::Trigger::Response> response) {
         (void) request;
+        RCLCPP_INFO(node_->get_logger(), "Reboot request received.");
         response->success = reboot();
         response->message = response->success ? "Rebooted successfully" : "Failed to reboot";
       });
 
-  adjust_offset_service_ = node_->create_service<hector_transmission_interface_msgs::srv::AdjustTransmissionOffsets>(
-      "~/adjust_transmission_offsets", std::bind(&DynamixelHardwareInterface::adjustTransmissionOffsetsCallback, this,
-                                                 std::placeholders::_1, std::placeholders::_2));
+  // Setup Adjustable Transmission Offset Manager
+  auto pre_callback = [this]() { return deactivateControllers(); };
+  auto post_callback = [this]() {
+    first_read_successful_ = false;  // force read after offset adjustment
+    return true;
+  };
+  offset_manager_ = std::make_shared<hector_transmission_interface::AdjustableOffsetManager>(
+      node_, std::ref(dynamixel_comm_mutex_), std::make_optional(pre_callback), std::make_optional(post_callback));
+
   // setup controller orchestrator
   controller_orchestrator_ = std::make_shared<controller_orchestrator::ControllerOrchestrator>(node_);
 
@@ -358,6 +365,14 @@ std::vector<hardware_interface::StateInterface::ConstSharedPtr> DynamixelHardwar
     }
     joint.state_transmission->configure(joint_handles, actuator_handles);
   }
+
+  // register offset manager state interfaces
+  for (const auto& [name, joint] : joints_) {
+    // try to register only adjustable offset transmissions
+    offset_manager_->add_joint_state_interface(name, joint.state_transmission, [&joint]() {
+      return joint.joint_state.current.at(hardware_interface::HW_IF_POSITION);
+    });
+  }
   return state_interfaces;
 }
 
@@ -396,7 +411,11 @@ std::vector<hardware_interface::CommandInterface::SharedPtr> DynamixelHardwareIn
     }
     joint.command_transmission->configure(joint_handles, actuator_handles);
   }
-
+  // register offset manager command interfaces
+  for (const auto& [name, joint] : joints_) {
+    // try to register only adjustable offset transmissions
+    offset_manager_->add_joint_command_interface(name, joint.command_transmission);
+  }
   return command_interfaces;
 }
 
@@ -745,8 +764,10 @@ bool DynamixelHardwareInterface::isHardwareOk() const
   return ok;
 }
 
-bool DynamixelHardwareInterface::reboot() const
+bool DynamixelHardwareInterface::reboot()
 {
+  // lock communication mutex (avoid simultaneous access with read / write)
+  std::lock_guard<std::mutex> lock(dynamixel_comm_mutex_);
   for (auto& [name, joint] : joints_) {
     if (joint.dynamixel->hardware_error_status != OK && !joint.dynamixel->reboot()) {
       DXL_LOG_ERROR("Dynamixel '" << name << "' reboot failed.");
@@ -759,65 +780,70 @@ bool DynamixelHardwareInterface::reboot() const
 bool DynamixelHardwareInterface::setTorque(const bool do_enable, bool skip_controller_unloading, int retries,
                                            const bool direct_write)
 {
-  std::lock_guard<std::mutex> lock(dynamixel_comm_mutex_);
-
-  // Check if already in desired state
-  bool all_torqued = true;
-  bool all_torqued_off = true;
-  for (const auto& [name, joint] : joints_) {
-    bool joint_torqued;
-    if (!joint.dynamixel->readRegister(DXL_REGISTER_CMD_TORQUE, joint_torqued)) {
-      return false;
+  // check if torque change is necessary
+  {
+    std::lock_guard<std::mutex> lock(dynamixel_comm_mutex_);
+    // Check if already in desired state
+    bool all_torqued = true;
+    bool all_torqued_off = true;
+    for (const auto& [name, joint] : joints_) {
+      bool joint_torqued;
+      if (!joint.dynamixel->readRegister(DXL_REGISTER_CMD_TORQUE, joint_torqued)) {
+        return false;
+      }
+      all_torqued &= joint_torqued;
+      all_torqued_off &= !joint_torqued;
     }
-    all_torqued &= joint_torqued;
-    all_torqued_off &= !joint_torqued;
+    // skip if all joints are already in the desired state
+    if (all_torqued != all_torqued_off && all_torqued == do_enable) {
+      DXL_LOG_INFO("All joints already have torque " << (do_enable ? "ENABLED" : "DISABLED") << ". Skipping ...");
+      return true;
+    }
   }
-  // skip if all joints are already in the desired state
-  if (all_torqued != all_torqued_off && all_torqued == do_enable) {
-    DXL_LOG_INFO("All joints already have torque " << (do_enable ? "ENABLED" : "DISABLED") << ". Skipping ...");
-    return true;
-  }
-
-  if (do_enable) {
-    // reset goal state before enabling torque && verify that goal positions are set correctly
-    if (!resetGoalStateAndVerify(joint_names_))
-      return false;
-  }
-
   // unload all controllers of the hardware interface (if hw is not in unconfigured state)
+  RCLCPP_INFO(get_logger(), "Controller unloading before changing torque is %s",
+              skip_controller_unloading ? "skipped" : "not skipped");
   if ((!skip_controller_unloading ||
        lifecycle_state_.label() == hardware_interface::lifecycle_state_names::UNCONFIGURED) &&
-      !unloadControllers()) {
+      !deactivateControllers()) {
     DXL_LOG_ERROR("Failed to deactivate controllers before changing torque. Still adapting torque...");
   }
   DXL_LOG_INFO((do_enable ? "Enabling" : "Disabling") << " motor torque.");
 
-  bool success = false;
-  retries = std::max(retries, 1);  // ensure at least one attempt
-  int counter = 0;
-  while (counter < retries && !success) {
-    success = true;
-    for (auto& [name, joint] : joints_) {
-      joint.torque = do_enable;  // set torque of each joint -> also relevant for indirect write
-      if (direct_write && !joint.dynamixel->writeRegister(DXL_REGISTER_CMD_TORQUE, joint.torque)) {
+  {
+    std::lock_guard<std::mutex> lock(dynamixel_comm_mutex_);
+    if (do_enable) {
+      // reset goal state before enabling torque && verify that goal positions are set correctly
+      if (!resetGoalStateAndVerify(joint_names_))
+        return false;
+    }
+    bool success = false;
+    retries = std::max(retries, 1);  // ensure at least one attempt
+    int counter = 0;
+    while (counter < retries && !success) {
+      success = true;
+      for (auto& [name, joint] : joints_) {
+        joint.torque = do_enable;  // set torque of each joint -> also relevant for indirect write
+        if (direct_write && !joint.dynamixel->writeRegister(DXL_REGISTER_CMD_TORQUE, joint.torque)) {
+          success = false;
+          break;  // Break if direct write fails
+        }
+      }
+
+      if (!direct_write && !torque_write_manager_.write()) {
         success = false;
-        break;  // Break if direct write fails
+      }
+
+      counter++;
+      if (!success) {
+        DXL_LOG_WARN("Failed to set torque for all joints. Retrying... (" << counter << " of " << retries << ")");
       }
     }
-
-    if (!direct_write && !torque_write_manager_.write()) {
-      success = false;
+    if (success) {
+      is_torqued_ = do_enable;
+      updateColorLED();
+      return true;
     }
-
-    counter++;
-    if (!success) {
-      DXL_LOG_WARN("Failed to set torque for all joints. Retrying... (" << counter << " of " << retries << ")");
-    }
-  }
-  if (success) {
-    is_torqued_ = do_enable;
-    updateColorLED();
-    return true;
   }
   return false;
 }
@@ -874,7 +900,7 @@ bool DynamixelHardwareInterface::resetGoalStateAndVerify(const std::vector<std::
   return true;
 }
 
-bool DynamixelHardwareInterface::unloadControllers() const
+bool DynamixelHardwareInterface::deactivateControllers() const
 {
   auto ctrls = controller_orchestrator_->getActiveControllerOfHardwareInterface(get_name());
   if (!controller_orchestrator_->deactivateControllers(ctrls)) {
@@ -932,69 +958,6 @@ void DynamixelHardwareInterface::updateColorLED(std::string new_state)
   }
 }
 
-void DynamixelHardwareInterface::adjustTransmissionOffsetsCallback(
-    const std::shared_ptr<hector_transmission_interface_msgs::srv::AdjustTransmissionOffsets::Request> request,
-    const std::shared_ptr<hector_transmission_interface_msgs::srv::AdjustTransmissionOffsets::Response> response)
-{
-  DXL_LOG_INFO("Request to adjust transmission offsets received.");
-  response->success = true;
-
-  if (lifecycle_state_.label() == hardware_interface::lifecycle_state_names::UNCONFIGURED) {
-    response->success = false;
-    response->message = "Hardware interface is in UNCONFIGURED state. Cannot adjust offsets.";
-    return;
-  }
-
-  if (!unloadControllers()) {
-    DXL_LOG_INFO("Failed to unload controllers. Cannot adjust offsets.");
-    response->success = false;
-    response->message = "Failed to deactivate controllers. Cannot adjust offsets.";
-  }
-
-  for (size_t i = 0; i < request->external_joint_measurements.name.size(); ++i) {
-    const auto& joint_name = request->external_joint_measurements.name[i];
-    const auto& external_joint_position = request->external_joint_measurements.position[i];
-    const auto& internal_joint_position = joints_[joint_name].joint_state.current["position"];
-    double corrected_offset = std::numeric_limits<double>::quiet_NaN();
-    std::string transmission_type;
-    for (const auto& info : info_.transmissions) {
-      if (info.joints.front().name == joint_name) {
-        transmission_type = info.type;
-        break;
-      }
-    }
-    if (transmission_type == "hector_transmission_interface/AdjustableOffsetTransmission") {
-      auto adjustable_state = std::dynamic_pointer_cast<hector_transmission_interface::AdjustableOffsetTransmission>(
-          joints_[joint_name].state_transmission);
-      auto adjustable_command = std::dynamic_pointer_cast<hector_transmission_interface::AdjustableOffsetTransmission>(
-          joints_[joint_name].command_transmission);
-
-      if (!adjustable_state || !adjustable_command) {
-        DXL_LOG_ERROR("Failed to cast transmission for joint '" << joint_name << "'.");
-        response->success = false;
-        response->message = "Transmission cast failed for joint: " + joint_name;
-        return;
-      }
-      double current_offset = adjustable_state->get_joint_offset();
-      corrected_offset = external_joint_position - internal_joint_position + current_offset;
-
-      adjustable_state->adjustTransmissionOffset(corrected_offset);
-      adjustable_command->adjustTransmissionOffset(corrected_offset);
-      DXL_LOG_INFO("Adjusted offset for joint '" << joint_name << "' to " << corrected_offset);
-    } else {
-      DXL_LOG_ERROR("Transmission type '" << transmission_type << "' is not supported for offset adjustment.");
-      response->success = false;
-      response->message = "Unsupported transmission type: " + transmission_type;
-      return;
-    }
-
-    response->adjusted_offsets.push_back(corrected_offset);
-  }
-
-  response->success = true;
-  response->message = "Offsets adjusted successfully";
-}
-
 bool DynamixelHardwareInterface::setEStop(bool do_enable)
 {
   if (do_enable != e_stop_active_) {
@@ -1007,7 +970,7 @@ bool DynamixelHardwareInterface::setEStop(bool do_enable)
       DXL_LOG_WARN("E-STOP ACTIVATED via topic");
       // unload controllers (not possible if hardware interface is not configured)
       if (lifecycle_state_.label() != hardware_interface::lifecycle_state_names::UNCONFIGURED) {
-        if (!unloadControllers()) {
+        if (!deactivateControllers()) {
           DXL_LOG_ERROR("Failed to unload controllers. Cannot activate e-stop.");
           return false;
         }
