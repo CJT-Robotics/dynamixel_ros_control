@@ -2,8 +2,8 @@ repositories:
   hector_transmission_interface:
     type: git
     url: https://github.com/tu-darmstadt-ros-pkg/hector_transmission_interface.git
-    version:  feature/transmission_manager # TODO: change back to main before merging
+    version:  main
   hector_controller_spawner:
     type: git
     url: https://github.com/tu-darmstadt-ros-pkg/hector_controller_spawner.git
-    version: feature/dependencies_repos # TODO: change back to jazzy !
+    version: jazzy
