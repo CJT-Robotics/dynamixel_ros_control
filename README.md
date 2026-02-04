@@ -1,10 +1,11 @@
 # dynamixel_ros_control
 
-_dynamixel_ros_control_ is a [ROS2](https://www.ros.org/) driver
-for [Robotis Dynamixel](http://www.robotis.us/dynamixel/) actuators. It is based on
-the  [ros2_control](https://control.ros.org/rolling/index.html) framework and implements a hardware interface.
+![Lint](https://github.com/tu-darmstadt-ros-pkg/dynamixel_ros_control/actions/workflows/lint_build_test.yaml/badge.svg)
 
-**Main features:**
+_dynamixel_ros_control_ is a [ROS2](https://www.ros.org/) driver for [Robotis Dynamixel](http://www.robotis.us/dynamixel/) actuators. It is based on the [ros2_control](https://control.ros.org/rolling/index.html) framework and implements a hardware interface.
+
+
+## Features
 
 * Support for all protocol 2.0 Dynamixel models
 * Support for mixed chains with different models in the same chain
@@ -13,18 +14,73 @@ the  [ros2_control](https://control.ros.org/rolling/index.html) framework and im
 * Provides state interfaces for **all** readable registers (position, velocity, input voltage, ...)
 * Provides command interfaces for **all** writable registers (position, velocity, LEDs, ...)
 * Automatic switching of control mode during runtime
-* Automatic reconnection in case of errors
+* Software E-Stop with automatic position hold
+* Hardware error detection with per-motor LED indication
+* Reboot service for error recovery
 
 ## Installation
 
-Install dynamixel_ros_control from source by cloning this repository into your ros2 workspace. The dependencies can be
-installed using [rosdep](http://wiki.ros.org/rosdep). Go into the dynamixel_ros_control folder and execute
+### Prerequisites
 
-```
-rosdep install --from-paths . --ignore-src -r -y
+* ROS 2 (Jazzy or later recommended)
+* [vcstool](https://github.com/dirk-thomas/vcstool) (`sudo apt install python3-vcstool`)
+* [rosdep](http://wiki.ros.org/rosdep) (`sudo apt install python3-rosdep`)
+
+### Building from Source
+
+1. **Create a workspace** (or use an existing one):
+
+   ```bash
+   mkdir -p ~/ros2_ws/src
+   cd ~/ros2_ws/src
+   ```
+
+2. **Clone the repository**:
+
+   ```bash
+   git clone https://github.com/tu-darmstadt-ros-pkg/dynamixel_ros_control.git
+   ```
+
+3. **Import dependencies using vcs**:
+
+   The package has dependencies that are not available via rosdep. Use `vcs import` to clone them.
+   Run this recursively to also fetch dependencies of dependencies:
+
+   ```bash
+   cd ~/ros2_ws/src
+   vcs import --recursive < dynamixel_ros_control/dependencies.repos
+   ```
+4. **Install rosdep dependencies**:
+
+   ```bash
+   cd ~/ros2_ws
+   rosdep install --from-paths src --ignore-src -r -y
+   ```
+
+5. **Build the workspace**:
+
+   ```bash
+   cd ~/ros2_ws
+   colcon build
+   ```
+
+6. **Source the workspace**:
+
+   ```bash
+   source ~/ros2_ws/install/setup.bash
+   ```
+
+### Running Tests
+
+To build and run the test suite:
+
+```bash
+colcon build --packages-select dynamixel_ros_control --cmake-args -DBUILD_TESTING=ON
+colcon test --packages-select dynamixel_ros_control
+colcon test-result --verbose
 ```
 
-Afterward, build your workspace.
+See [dynamixel_ros_control/test/README.md](dynamixel_ros_control/test/README.md) for detailed test documentation.
 
 ## Getting started
 
@@ -57,15 +113,14 @@ using [rqt_controller_manager](https://control.ros.org/rolling/doc/ros2_control/
 The motors are configured in the ros2_control tag of the robot description. Example:
 
 ```xml
-
 <xacro:macro name="ros2_control_test_config">
     <ros2_control name="hardware_interface" type="system">
         <hardware>
             <plugin>dynamixel_ros_control/DynamixelHardwareInterface</plugin>
-            <param name="port_name">/dev/ttyUSB0</param>       <!-- path to USB serial converter -->
-            <param name="baud_rate">57600</param>              <!-- baud rate of the dynamixel motors -->
-            <param name="torque_on_startup">true</param>       <!-- enable motor torque on startup -->
-            <param name="torque_off_on_shutdown">false</param> <!-- disable motor torque on shutdown -->
+            <param name="port_name">/dev/ttyUSB0</param>             <!-- path to USB serial converter -->
+            <param name="baud_rate">57600</param>                    <!-- baud rate of the dynamixel motors -->
+            <param name="torque_on_startup">true</param>             <!-- enable motor torque on startup -->
+            <param name="torque_off_on_shutdown">false</param>       <!-- disable motor torque on shutdown -->
         </hardware>
 
         <joint name="joint_1">
@@ -99,7 +154,7 @@ directly use register names, e.g.:
 
 will make the input voltage available to controllers as a state interface.
 
-## Advanced features
+## Advanced Features
 
 ### Automatic conversion to SI units
 
@@ -135,10 +190,39 @@ their current positions. Once a false message is published, normal control behav
 
 The onboard LED reflects the current state of the hardware interface:
 
-* **🔴 Red** – Hardware interface is **inactive** or **unconfigured**
-* **🟠 Orange** - The software E‑Stop is engaged. All motion commands are suppressed, ensuring the robot cannot move
-* **🔵 Blue** – Hardware interface is **active**, and motors are **torqued on** (controllers can command the joints)
-* **🟢 Green** – Hardware interface is **active**, but motors are **torqued off** (safe for manual movement)
+| Color | Meaning |
+|-------|---------|
+| 🟣 **Pink** | Hardware interface is **inactive** or **unconfigured** |
+| 🔵 **Blue** | Hardware interface is **active**, motors are **torqued on** (normal operation) |
+| 🟢 **Green** | Hardware interface is **active**, motors are **torqued off** (safe for manual movement) |
+| 🟠 **Orange** | Software **E-Stop** is engaged – all motion commands are suppressed |
+| 🔴 **Red** | **Hardware error** detected on this specific motor |
+
+> **Note:** When a hardware error occurs, the affected motor shows red while other motors show orange (E-Stop is automatically activated for safety).
+
+### Hardware Error Handling
+
+When a Dynamixel motor reports a hardware error (overload, overheating, etc.):
+
+1. The hardware interface automatically activates the **E-Stop** to prevent other actuators from moving
+2. The affected motor's LED turns **red**, other motors turn **orange**
+3. The hardware interface continues running (no restart required)
+4. Use the **reboot service** to attempt recovery
+
+### Reboot Service
+
+Motors can be rebooted to recover from hardware errors:
+
+```bash
+ros2 service call /<hardware_interface>/reboot std_srvs/srv/Trigger
+```
+
+The reboot service:
+* Only reboots motors that have hardware errors (not all motors)
+* Waits for motors to come back online
+* Verifies the hardware error is cleared
+* Releases the E-Stop if successful
+* Restores the previous torque state
 
 ### Mimic Joints
 

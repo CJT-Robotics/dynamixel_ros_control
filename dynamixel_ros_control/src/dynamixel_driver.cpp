@@ -1,6 +1,8 @@
 #include "dynamixel_ros_control/log.hpp"
 
+#include <cstring>
 #include <dynamixel_ros_control/dynamixel_driver.hpp>
+#include <dynamixel_ros_control/mock_dynamixel.hpp>
 
 #include <dynamixel_ros_control/common.hpp>
 #include <ament_index_cpp/get_package_share_directory.hpp>
@@ -10,11 +12,12 @@
 namespace dynamixel_ros_control {
 
 DynamixelDriver::DynamixelDriver()
-    : next_indirect_address_index_(0)
+    : next_indirect_address_index_(0), use_dummy_(false)
 {}
 
-bool DynamixelDriver::init(const std::string& port_name, const int baud_rate)
+bool DynamixelDriver::init(const std::string& port_name, const int baud_rate, bool use_dummy)
 {
+  use_dummy_ = use_dummy;
   port_name_ = port_name;
   setPortHandler(port_name_);
 
@@ -65,7 +68,7 @@ bool DynamixelDriver::loadSeriesMapping()
     return false;
   }
   for (YAML::const_iterator it = config.begin(); it != config.end(); ++it) {
-    // TODO check if types are valid
+    // TODO: check if types are valid
     auto model_number = it->first.as<uint16_t>();
     auto series = it->second.as<std::string>();
     model_number_to_series_.emplace(model_number, series);
@@ -75,41 +78,39 @@ bool DynamixelDriver::loadSeriesMapping()
 
 ControlTable* DynamixelDriver::readControlTable(std::string series)
 {
-  ControlTable table;
-  auto [entry, success] = series_to_control_table_.emplace(series, table);
-  ControlTable* table_ptr = &entry->second;  // TODO avoid raw pointer!
+  // Emplace empty table first, then load into it (avoids copy)
+  auto [entry, inserted] = series_to_control_table_.try_emplace(series);
+  if (!inserted) {
+    // Already existed - return cached pointer
+    return &entry->second;
+  }
+
   const std::string path = package_path_ + "/devices/models/" + series + ".yaml";
   if (!entry->second.loadFromYaml(path)) {
     DXL_LOG_ERROR("Failed to read control table for '" << series << "'");
+    series_to_control_table_.erase(entry);
     return nullptr;
   }
-  return table_ptr;
+  return &entry->second;
 }
 
 ControlTable* DynamixelDriver::loadControlTable(const uint16_t model_number)
 {
-  std::string series;
-  try {
-    series = model_number_to_series_.at(model_number);
-  }
-  catch (const std::out_of_range&) {
-    DXL_LOG_FATAL("Could not find series of model number " << model_number);
-    return nullptr;
+  // Look up series name for model number
+  if (auto it = model_number_to_series_.find(model_number); it != model_number_to_series_.end()) {
+    const auto& series = it->second;
+
+    // Check if control table is already cached
+    if (auto table_it = series_to_control_table_.find(series); table_it != series_to_control_table_.end()) {
+      return &table_it->second;
+    }
+
+    // Load and cache the control table
+    return readControlTable(series);
   }
 
-  // Check if control table was loaded already
-  ControlTable* control_table;
-  try {
-    control_table = &series_to_control_table_.at(series);
-  }
-  catch (const std::out_of_range&) {
-    control_table = nullptr;
-  }
-  if (!control_table) {
-    // Read it
-    control_table = readControlTable(series);
-  }
-  return control_table;
+  DXL_LOG_FATAL("Could not find series of model number " << model_number);
+  return nullptr;
 }
 
 bool DynamixelDriver::ping(const uint8_t id) const
@@ -137,6 +138,13 @@ std::vector<std::pair<uint8_t, uint16_t>> DynamixelDriver::scan() const
   return dxl_list;
 }
 
+void DynamixelDriver::addDummyMotor(uint8_t id, uint16_t model_number)
+{
+  if (use_dummy_) {
+    MockDynamixelManager::instance().addMotor(id, model_number);
+  }
+}
+
 bool DynamixelDriver::reboot(const uint8_t id) const
 {
   uint8_t error = 0;
@@ -162,16 +170,15 @@ bool DynamixelDriver::writeRegister(const uint8_t id, const uint16_t address, co
   int comm_result = COMM_TX_FAIL;
 
   if (data_length == 1) {
-    auto value_8bit = static_cast<int8_t>(value);
-    comm_result =
-        packet_handler_->write1ByteTxRx(port_handler_, id, address, *reinterpret_cast<uint8_t*>(&value_8bit), &error);
+    auto value_8bit = static_cast<uint8_t>(value & 0xFF);
+    comm_result = packet_handler_->write1ByteTxRx(port_handler_, id, address, value_8bit, &error);
   } else if (data_length == 2) {
-    auto value_16bit = static_cast<int16_t>(value);
-    comm_result =
-        packet_handler_->write2ByteTxRx(port_handler_, id, address, *reinterpret_cast<uint16_t*>(&value_16bit), &error);
+    auto value_16bit = static_cast<uint16_t>(value & 0xFFFF);
+    comm_result = packet_handler_->write2ByteTxRx(port_handler_, id, address, value_16bit, &error);
   } else if (data_length == 4) {
-    comm_result =
-        packet_handler_->write4ByteTxRx(port_handler_, id, address, *reinterpret_cast<uint32_t*>(&value), &error);
+    uint32_t unsigned_value;
+    std::memcpy(&unsigned_value, &value, sizeof(uint32_t));
+    comm_result = packet_handler_->write4ByteTxRx(port_handler_, id, address, unsigned_value, &error);
   }
 
   if (comm_result != COMM_SUCCESS) {
@@ -203,10 +210,11 @@ bool DynamixelDriver::readRegister(const uint8_t id, const uint16_t address, con
   } else if (data_length == 2) {
     uint16_t data;
     comm_result = packet_handler_->read2ByteTxRx(port_handler_, id, address, &data, &error);
-    value_out = data;
+    value_out = static_cast<int16_t>(data);  // Sign extension for signed 16-bit values
   } else if (data_length == 4) {
-    comm_result =
-        packet_handler_->read4ByteTxRx(port_handler_, id, address, reinterpret_cast<uint32_t*>(&value_out), &error);
+    uint32_t data;
+    comm_result = packet_handler_->read4ByteTxRx(port_handler_, id, address, &data, &error);
+    std::memcpy(&value_out, &data, sizeof(int32_t));
   } else {
     DXL_LOG_ERROR("Unsupported data length: " << data_length);
     return false;
@@ -228,18 +236,34 @@ bool DynamixelDriver::readRegister(const uint8_t id, const uint16_t address, con
   return true;
 }
 
-dynamixel::GroupSyncWrite* DynamixelDriver::setSyncWrite(uint16_t address, uint8_t data_length) const
+std::shared_ptr<GroupSyncWrite> DynamixelDriver::setSyncWrite(uint16_t address, uint8_t data_length) const
 {
-  return new dynamixel::GroupSyncWrite(port_handler_, packet_handler_, address, data_length);
+  if (use_dummy_) {
+    return std::make_shared<MockGroupSyncWrite>(port_handler_, packet_handler_, address, data_length);
+  }
+  return std::make_shared<RealGroupSyncWrite>(port_handler_, packet_handler_, address, data_length);
 }
 
-dynamixel::GroupSyncRead* DynamixelDriver::setSyncRead(uint16_t address, uint8_t data_length) const
+std::shared_ptr<GroupSyncRead> DynamixelDriver::setSyncRead(uint16_t address, uint8_t data_length) const
 {
-  return new dynamixel::GroupSyncRead(port_handler_, packet_handler_, address, data_length);
+  if (use_dummy_) {
+    return std::make_shared<MockGroupSyncRead>(port_handler_, packet_handler_, address, data_length);
+  }
+  return std::make_shared<RealGroupSyncRead>(port_handler_, packet_handler_, address, data_length);
 }
 
 bool DynamixelDriver::requestIndirectAddresses(const unsigned int data_length, unsigned int& address_start_index)
 {
+  if (use_dummy_) {
+    // Mock indirect addresses simply by incrementing.
+    // The MockDynamixel/MockPacketHandler logic doesn't strictly enforce indirect address checking
+    // unless we implemented complex indirect address logic in the mock.
+    // For now, let's just pretend it works.
+    address_start_index = next_indirect_address_index_;
+    next_indirect_address_index_ += data_length;
+    DXL_LOG_DEBUG("[INDIRECT ADDRESS MOCK] Reserving " << address_start_index);
+    return true;
+  }
   DXL_LOG_DEBUG("[INDIRECT ADDRESS] Reserving indirect address index " << address_start_index << " with length "
                                                                        << data_length);
   address_start_index = next_indirect_address_index_;
@@ -278,7 +302,11 @@ std::string DynamixelDriver::packetErrorToString(const uint8_t error) const
 bool DynamixelDriver::setPacketHandler()
 {
   constexpr float protocol_version = 2.0;
-  packet_handler_ = dynamixel::PacketHandler::getPacketHandler(protocol_version);
+  if (use_dummy_) {
+    packet_handler_ = std::make_shared<MockPacketHandler>(protocol_version);
+  } else {
+    packet_handler_ = std::make_shared<RealPacketHandler>(protocol_version);
+  }
   if (!packet_handler_) {
     DXL_LOG_ERROR("Unsupported protocol version: " << protocol_version);
     return false;
@@ -288,7 +316,11 @@ bool DynamixelDriver::setPacketHandler()
 
 bool DynamixelDriver::setPortHandler(const std::string& port_name)
 {
-  port_handler_ = dynamixel::PortHandler::getPortHandler(port_name.c_str());
+  if (use_dummy_) {
+    port_handler_ = std::make_shared<MockPortHandler>(port_name.c_str());
+  } else {
+    port_handler_ = std::make_shared<RealPortHandler>(port_name.c_str());
+  }
   return true;
 }
 

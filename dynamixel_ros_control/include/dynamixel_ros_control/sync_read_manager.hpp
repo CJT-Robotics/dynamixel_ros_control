@@ -3,7 +3,8 @@
 
 #include <dynamixel_ros_control/dynamixel_driver.hpp>
 #include <dynamixel_ros_control/dynamixel.hpp>
-#include <dynamixel_sdk/group_sync_read.h>
+#include <dynamixel_ros_control/dynamixel.hpp>
+#include <dynamixel_ros_control/sdk_wrapper.hpp>
 #include <rclcpp/rclcpp.hpp>
 
 namespace dynamixel_ros_control {
@@ -49,23 +50,23 @@ public:
    * @param dxl Pointer to dynamixel
    */
   void addDynamixel(Dynamixel* dxl);
-  bool addRegister(std::string register_name, const DxlValueMappingList& dxl_value_pairs,
-                   std::vector<double> offsets = {});
+  [[nodiscard]] bool addRegister(std::string register_name, const DxlValueMappingList& dxl_value_pairs,
+                                 std::vector<double> offsets = {});
 
   /**
    * @brief init To be called by dynamixel driver.
    * Writes the indirect addresses and sets up the sync read
    * @return
    */
-  bool init(DynamixelDriver& driver);
-  bool read();
-  bool read(rclcpp::Time& packet_receive_time);
+  [[nodiscard]] bool init(DynamixelDriver& driver);
+  [[nodiscard]] bool read();
+  [[nodiscard]] bool read(rclcpp::Time& packet_receive_time);
 
   [[nodiscard]] bool isOk() const;
   void setErrorThreshold(unsigned int threshold);
 
 private:
-  dynamixel::GroupSyncRead* sync_read_{nullptr};  // TODO get right of raw pointers
+  std::shared_ptr<GroupSyncRead> sync_read_{nullptr};
 
   DynamixelDriver* driver_{nullptr};
   std::set<Dynamixel*> dynamixels_;
