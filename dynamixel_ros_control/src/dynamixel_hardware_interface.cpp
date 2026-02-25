@@ -204,6 +204,12 @@ DynamixelHardwareInterface::on_init(const hardware_interface::HardwareComponentI
   // setup controller orchestrator
   controller_orchestrator_ = std::make_shared<controller_orchestrator::ControllerOrchestrator>(node_);
 
+  // set up realtime-safe publishers (actual ROS publish happens on internal threads, not control thread)
+  rt_diagnostics_pub_ = std::make_shared<realtime_tools::RealtimePublisher<diagnostic_msgs::msg::DiagnosticArray>>(
+      node_->create_publisher<diagnostic_msgs::msg::DiagnosticArray>("~/diagnostics", rclcpp::QoS(1).transient_local()));
+  rt_goal_joint_state_pub_ = std::make_shared<realtime_tools::RealtimePublisher<sensor_msgs::msg::JointState>>(
+      node_->create_publisher<sensor_msgs::msg::JointState>("~/goal_joint_states", 1));
+
   // set up e-stop subscription
   std::string topic = ns != "/" ? ns + "/soft_e_stop" : "/soft_e_stop";
   soft_e_stop_subscription_ = node_->create_subscription<std_msgs::msg::Bool>(
@@ -585,6 +591,10 @@ hardware_interface::return_type DynamixelHardwareInterface::read(const rclcpp::T
 
   first_read_successful_ = true;
   last_successful_read_time_ = time;
+
+  publishDiagnostics();
+  publishGoalJointStates();
+
   return hardware_interface::return_type::OK;
 }
 
@@ -635,6 +645,63 @@ hardware_interface::return_type DynamixelHardwareInterface::write(const rclcpp::
     return hardware_interface::return_type::ERROR;
   }
   return hardware_interface::return_type::OK;
+}
+
+void DynamixelHardwareInterface::publishDiagnostics()
+{
+  // Compare raw values to detect changes
+  DiagnosticState current;
+  current.hw_ok = isHardwareOk();
+  current.e_stop_active = e_stop_active_.load();
+  current.torque_enabled = is_torqued_.load();
+  current.read_errors = read_manager_.getErrorCount();
+  current.write_errors = control_write_manager_.getErrorCount();
+  for (const auto& [name, joint] : joints_) {
+    auto status = joint.dynamixel->hardware_error_status;
+    if (status != OK) {
+      current.joint_hw_errors[name] = status;
+    }
+  }
+
+  if (first_diagnostics_published_ && current == last_diag_state_) {
+    return;
+  }
+
+  if (!rt_diagnostics_pub_->trylock()) {
+    return;
+  }
+
+  auto& msg = rt_diagnostics_pub_->msg_;
+  msg.header.stamp = node_->now();
+  msg.status = {current.toMsg(get_name())};
+
+  rt_diagnostics_pub_->unlockAndPublish();
+  last_diag_state_ = current;
+  first_diagnostics_published_ = true;
+}
+
+void DynamixelHardwareInterface::publishGoalJointStates()
+{
+  if (rt_goal_joint_state_pub_->trylock()) {
+    auto& msg = rt_goal_joint_state_pub_->msg_;
+    msg.header.stamp = node_->now();
+    msg.name.resize(joint_names_.size());
+    msg.position.resize(joint_names_.size());
+    msg.velocity.resize(joint_names_.size());
+    msg.effort.resize(joint_names_.size());
+
+    for (size_t i = 0; i < joint_names_.size(); ++i) {
+      const auto& joint = joints_.at(joint_names_[i]);
+      msg.name[i] = joint_names_[i];
+      auto gpos_it = joint.joint_state.goal.find(hardware_interface::HW_IF_POSITION);
+      msg.position[i] = gpos_it != joint.joint_state.goal.end() ? gpos_it->second : 0.0;
+      auto gvel_it = joint.joint_state.goal.find(hardware_interface::HW_IF_VELOCITY);
+      msg.velocity[i] = gvel_it != joint.joint_state.goal.end() ? gvel_it->second : 0.0;
+      auto geff_it = joint.joint_state.goal.find(hardware_interface::HW_IF_EFFORT);
+      msg.effort[i] = geff_it != joint.joint_state.goal.end() ? geff_it->second : 0.0;
+    }
+    rt_goal_joint_state_pub_->unlockAndPublish();
+  }
 }
 
 bool DynamixelHardwareInterface::loadTransmissionConfiguration()
