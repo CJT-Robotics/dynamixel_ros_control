@@ -76,6 +76,11 @@ public:
     return preferred_position_control_mode_;
   }
 
+  bool doNotResetOnCtrlChange() const
+  {
+    return do_not_reset_on_ctrl_change_;
+  }
+
   // Parameters
   std::string name;
   std::shared_ptr<Dynamixel> dynamixel;
@@ -104,6 +109,7 @@ private:
   std::unordered_map<std::string, double> default_goal_values_;
 
   // Parameters
+  bool do_not_reset_on_ctrl_change_{false};
   ControlMode preferred_position_control_mode_{POSITION};
   std::vector<std::string> state_interfaces_;
   std::vector<std::string> command_interfaces_;

@@ -246,6 +246,11 @@ Supports runtime calibration of joint offsets. Useful for flippers or joints tha
 * Offsets can be adjusted **per joint** using external joint position measurements.
 * Automatically deactivates all active controllers before adjusting any transmission offsets.
 * New offsets are saved persistently and automatically restored after reboot.
+* **Automatic 2π jump correction**: When an actuator briefly loses power and its position resets by a multiple of 2π,
+  the transmission detects the jump and compensates the offset automatically. The command transmission is synchronized
+  to keep goal positions consistent. See the
+  [hector_transmission_interface README](https://github.com/tu-darmstadt-ros-pkg/hector_transmission_interface) for
+  details.
 
 To calibrate joints, call:
 

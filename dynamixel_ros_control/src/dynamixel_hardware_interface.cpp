@@ -142,6 +142,7 @@ DynamixelHardwareInterface::on_init(const hardware_interface::HardwareComponentI
     ss << "-- state interfaces: " << iterableToString(joint.getAvailableStateInterfaces()) << std::endl;
     ss << "-- mounting_offset: " << joint.mounting_offset << std::endl;
     ss << "-- offset: " << joint.offset << std::endl;
+    ss << "-- do_not_reset_on_ctrl_change: " << joint.doNotResetOnCtrlChange() << std::endl;
     ss << "-- initial values: " << mapToString(joint.dynamixel->getInitialRegisterValues()) << std::endl;
     DXL_LOG_DEBUG(ss.str());
     joints_.emplace(joint.name, std::move(joint));
@@ -479,6 +480,10 @@ DynamixelHardwareInterface::perform_command_mode_switch(const std::vector<std::s
     if (!splitFullInterfaceName(full_interface_name, joint_name, interface_name)) {
       return hardware_interface::return_type::ERROR;
     }
+    if (joints_.count(joint_name) > 0 && joints_[joint_name].doNotResetOnCtrlChange()) {
+      DXL_LOG_DEBUG("Skipping reset for joint '" << joint_name << "' (do_not_reset_on_ctrl_change is set).");
+      continue;
+    }
     if (std::find(joints_to_reset.begin(), joints_to_reset.end(), joint_name) == joints_to_reset.end())
       joints_to_reset.emplace_back(joint_name);
   }
@@ -487,6 +492,10 @@ DynamixelHardwareInterface::perform_command_mode_switch(const std::vector<std::s
     std::string interface_name;
     if (!splitFullInterfaceName(full_interface_name, joint_name, interface_name)) {
       return hardware_interface::return_type::ERROR;
+    }
+    if (joints_.count(joint_name) > 0 && joints_[joint_name].doNotResetOnCtrlChange()) {
+      DXL_LOG_DEBUG("Skipping reset for joint '" << joint_name << "' (do_not_reset_on_ctrl_change is set).");
+      continue;
     }
     if (std::find(joints_to_reset.begin(), joints_to_reset.end(), joint_name) == joints_to_reset.end())
       joints_to_reset.emplace_back(joint_name);
@@ -577,7 +586,8 @@ hardware_interface::return_type DynamixelHardwareInterface::read(const rclcpp::T
     }
 
     // reset after first read (e.g. goal position = current position)
-    if (!first_read_successful_) {
+    // TODO: separaate first_read and ctrl_changed flags!
+    if (!first_read_successful_ && !joint.doNotResetOnCtrlChange()) {
       joint.resetGoalState();
     }
     joint.updateMimicJointStates();

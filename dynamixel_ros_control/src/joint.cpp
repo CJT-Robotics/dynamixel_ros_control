@@ -56,6 +56,9 @@ bool Joint::loadConfiguration(DynamixelDriver& driver, const hardware_interface:
     preferred_position_control_mode_ = stringToControlMode(control_mode_str);
   }
 
+  // Option to skip reset on controller change
+  getParameter(info.parameters, "do_not_reset_on_ctrl_change", do_not_reset_on_ctrl_change_, false);
+
   // Initial values
   std::unordered_map<std::string, std::string> initial_register_values;
   for (const auto& [param_name, param_value] : info.parameters) {
@@ -148,7 +151,9 @@ bool Joint::addActiveCommandInterface(const std::string& interface_name)
     return true;
   }
 
-  resetGoalState(interface_name);
+  if (!do_not_reset_on_ctrl_change_) {
+    resetGoalState(interface_name);
+  }
   active_command_interfaces_.emplace_back(interface_name);
   return true;
 }
@@ -163,7 +168,9 @@ bool Joint::removeActiveCommandInterface(const std::string& interface_name)
     return false;
   }
 
-  resetGoalState(interface_name);
+  if (!do_not_reset_on_ctrl_change_) {
+    resetGoalState(interface_name);
+  }
   active_command_interfaces_.erase(it);
   return true;
 }
